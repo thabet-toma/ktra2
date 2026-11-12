@@ -99,80 +99,18 @@ ACCOUNTING_FIRM_DOCUMENT_TYPES = [
 
 # ISSUE #78: خمس خدمات مهنية جاهزة، كلٌّ مربوطٌ بحساب أتعابه في `ACCOUNTING_FIRM_COA`
 # — بلا هذا الربط تبقى `4103`-`4106` حساباتٍ ميتة لا يصلها شيء. (sku, name_ar, account_code)
+#
+# ISSUE #291: لم يبقَ قالبٌ يزرعها بعد حذف `accounting_firm`، لكنّها **بياناتُ
+# كتالوج أتعاب المكتب** لا بذرةَ قالب: تُقرأ في تركيبات اختبارات #78
+# (`sales/tests/test_office_service_fee_accounts.py` و
+# `inventory/tests/test_product_lookup_endpoint.py`)، وكتالوج خدمات الموديول
+# الجديد يأتي في تذكرة الأتعاب.
 ACCOUNTING_FIRM_SERVICES = [
     ('SVC-BOOKKEEPING', 'مسك دفاتر شهري', '4103'),
     ('SVC-VAT-RETURN', 'إعداد إقرار ض.ق.م', '4104'),
     ('SVC-INCOME-TAX', 'إقرار ضريبة دخل سنوي', '4104'),
     ('SVC-AUDIT', 'تدقيق ومراجعة', '4105'),
     ('SVC-CONSULTING', 'تأسيس واستشارات', '4106'),
-]
-
-# ── ISSUE #81 — بذرة قالب «دفتر عميل» (القسم ١ من #77) — من التذكرة حرفياً ──
-#
-# دفترٌ يفتحه مكتب محاسبة (ISSUE #65 `ClientBooksPanel`) ليمسك حسابات زبونه
-# **يدوياً بالسندات**، لا بفواتير بيع وشراء ولا بمخزون — الجرد دوريّ يُقفله
-# المحاسب بقيدٍ واحد. من يحتاج مخزوناً فعلياً يلزمه قالب `general`.
-#
-# `52` هو نفسه `EXPENSE_VOUCHER_PARENT_CODE` و`42` هو `REVENUE_VOUCHER_PARENT_CODE`
-# (`accounting/services.py`) — أب حساب مصروف/إيراد يُنشأ بالاسم من داخل السند
-# يهبط هنا افتراضاً، فوجودهما في هذه البذرة ليس اختيارياً.
-CLIENT_BOOK_COA = [
-    # Root nodes
-    ('1', 'الأصول', 'Asset', None),
-    ('2', 'الالتزامات', 'Liability', None),
-    ('3', 'حقوق الملكية', 'Equity', None),
-    ('4', 'الإيرادات', 'Revenue', None),
-    ('5', 'المصروفات', 'Expense', None),
-
-    # Assets (1)
-    ('11', 'الأصول المتداولة', 'Asset', '1'),
-    ('1101', 'النقدية', 'Asset', '11'),
-    ('1102', 'البنوك', 'Asset', '11'),
-    ('1103', 'المدينون التجاريون (ذمم عملاء)', 'Asset', '11'),
-    ('1105', 'ضريبة القيمة المضافة - مدخلات', 'Asset', '11'),
-
-    # Liabilities (2)
-    ('21', 'الالتزامات المتداولة', 'Liability', '2'),
-    ('2101', 'الدائنون التجاريون (ذمم موردين)', 'Liability', '21'),
-    ('2103', 'مصاريف مستحقة', 'Liability', '21'),
-    ('2104', 'ضريبة القيمة المضافة - مخرجات', 'Liability', '21'),
-
-    # Equity (3)
-    ('31', 'رأس المال', 'Equity', '3'),
-    ('3101', 'رأس المال المدفوع', 'Equity', '31'),
-    ('32', 'الأرباح المحتجزة', 'Equity', '3'),
-    ('33', 'مسحوبات المالك', 'Equity', '3'),
-
-    # Revenue (4)
-    ('41', 'المبيعات', 'Revenue', '4'),
-    ('4101', 'إيرادات المبيعات', 'Revenue', '41'),
-    ('42', 'إيرادات أخرى', 'Revenue', '4'),
-
-    # Expenses (5) — لا 51 تكلفة بضاعة مباعة ولا 1104 مخزون: المشتريات مصروفٌ
-    # مباشر، والجرد الدوري يُسوّى بقيدٍ يدوي واحد لا بحساب مخزون حيّ.
-    ('51', 'المشتريات', 'Expense', '5'),
-    ('52', 'المصاريف التشغيلية', 'Expense', '5'),
-    ('5201', 'إيجار', 'Expense', '52'),
-    ('5202', 'رواتب وأجور', 'Expense', '52'),
-    ('5203', 'كهرباء ومياه', 'Expense', '52'),
-    ('5204', 'اتصالات وإنترنت', 'Expense', '52'),
-    ('5205', 'نقل ومحروقات', 'Expense', '52'),
-    ('5206', 'قرطاسية ومطبوعات', 'Expense', '52'),
-    ('5207', 'صيانة وإصلاحات', 'Expense', '52'),
-    ('5208', 'مصاريف بنكية وعمولات', 'Expense', '52'),
-    ('5209', 'دعاية وإعلان', 'Expense', '52'),
-    ('5210', 'رسوم ورخص واشتراكات', 'Expense', '52'),
-    ('5211', 'أتعاب مهنية', 'Expense', '52'),
-    ('5212', 'تأمين', 'Expense', '52'),
-    ('5213', 'اهتلاك', 'Expense', '52'),
-    ('53', 'مصاريف نثرية', 'Expense', '5'),
-]
-
-# دفاتر القالب المزروعة — خمسة أنواع فقط: سندات القبض والصرف والمصروف والإيراد
-# وقيد اليومية. لا فواتير بيع/شراء ولا إشعارات دائنة/مدينة (لا مرجع لها بلا فواتير).
-CLIENT_BOOK_DOCUMENT_TYPES = [
-    'receipt_voucher', 'payment_voucher', 'expense_voucher', 'revenue_voucher',
-    'journal_entry',
 ]
 
 DEFAULT_TEMPLATE = 'general'
@@ -185,10 +123,10 @@ DEFAULT_TEMPLATE = 'general'
 # (الحارس الوحيد — فحصٌ ببادئة المسار لا لمسٌ لكل ViewSet). مرآتها في الواجهة:
 # `frontend_v2/utils/viewPermissions.ts` (`TEMPLATE_HIDDEN_VIEWS`) — سِجلٌّ
 # مستقلّ بمفاتيح شاشات لا مسارات، فلا تتوقّع تطابقاً حرفياً بين الاثنين.
-# مشترَكة بين `accounting_firm` و`client_book`: مخزون واستيراد ولوجستيات ومتجر
-# وما بعد بيع وأجهزة حسّاسة — أيّ قالبٍ بلا حركة بضاعة فعلية لا يحتاجها.
+# مشترَكة بين قوالب المكتب: مخزون واستيراد ولوجستيات ومتجر وما بعد بيع وأجهزة
+# حسّاسة — أيّ قالبٍ بلا حركة بضاعة فعلية لا يحتاجها.
 # `logistics` **لا تُقنَّع جملةً**: `supplier-payments` (سند الصرف) يعيش تحتها
-# لأسبابٍ تاريخية، وكلا القالبين يُبقي «سندات القبض والصرف» صراحةً في «ما يبقى»
+# لأسبابٍ تاريخية، والقالب يُبقي «سندات القبض والصرف» صراحةً في «ما يبقى»
 # — يحتاجه المكتب فعلاً ليسدّد ذمّة `2101` التي يفتحها سند المصروف. فتُسمّى
 # المسارات المقنَّعة واحداً واحداً.
 _GOODS_MOVEMENT_HIDDEN_PATHS = (
@@ -217,23 +155,10 @@ _GOODS_MOVEMENT_HIDDEN_PATHS = (
 )
 
 TEMPLATE_HIDDEN_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
-    'accounting_firm': _GOODS_MOVEMENT_HIDDEN_PATHS,
-    # ISSUE #271: قالب الموديول الجديد يقنّع ما يقنّعه `accounting_firm` حرفياً —
-    # لا بضاعة في مكتب محاسبة، ولا نسخةً ثانية من القائمة تفترق عنها لاحقاً.
+    # ISSUE #271: قالب الموديول الجديد — مكتبُ محاسبةٍ لا حركة بضاعة فيه.
+    # ISSUE #291: كان مفتاحان آخران هنا (`accounting_firm` و`client_book`) مع
+    # طبقة المكتب القديمة؛ حُذفا معها فبقي القالب الحيّ واحداً.
     'accounting_office': _GOODS_MOVEMENT_HIDDEN_PATHS,
-    # ISSUE #81: `client_book` يُقنِّع كل ما يُقنِّعه `accounting_firm` — ويزيد
-    # عليه فواتير البيع نفسها (لا فواتير بيع/شراء في هذا القالب، السندات وحدها)
-    # وأوامر البيع وعروض الأسعار والإرساليات والمحجوزات — بضاعةٌ لا مكان لها في
-    # دفتر لا مخزون فيه. «أرباح الفواتير» فرعٌ من `/api/sales/invoices/` فتقنيعها
-    # يقنِّعه معه بلا سطرٍ إضافي. حساب العميل نفسه (`/api/sales/payments/` سند
-    # القبض) يبقى مفتوحاً — أحد الدفاتر الخمسة المزروعة.
-    'client_book': _GOODS_MOVEMENT_HIDDEN_PATHS + (
-        '/api/sales/invoices/',
-        '/api/sales/quotations/',
-        '/api/sales/orders/',
-        '/api/sales/delivery-orders/',
-        '/api/sales/reports/reserved-stock/',
-    ),
 }
 
 _ALL_HIDDEN_PREFIXES = tuple(sorted({
@@ -271,30 +196,18 @@ COMPANY_TEMPLATES = {
         'masked_views': [],
         'services': None,
     },
-    'accounting_firm': {
-        'key': 'accounting_firm',
-        'name': 'مكتب محاسبة',
-        'icon': 'calculator',
-        'description': 'أتعاب مهنية بلا مخزون ولا استيراد — سبعة أنواع مستندات فقط.',
-        'coa': ACCOUNTING_FIRM_COA,
-        'document_types': ACCOUNTING_FIRM_DOCUMENT_TYPES,
-        'masked_views': [],
-        'services': ACCOUNTING_FIRM_SERVICES,
-    },
-    # ── ISSUE #271 — القالب الجديد لموديول مكتب المحاسبة، **بجانب** القديم ──
+    # ── ISSUE #271 — قالبُ موديول مكتب المحاسبة، والقالبُ الحيّ الوحيد للمكاتب ──
     #
-    # `accounting_firm` لا يُلمَس: له مستخدموه، وشاشاته (`client-books`،
-    # `office-desk`) وطبقةُ المكتب القديمة في `accountant_portal` تعمل كما هي.
-    # هذا مفتاحٌ مستقلّ يفتح الموديول الجديد وحده.
+    # ISSUE #291: كان هذا المفتاح **بجانب** `accounting_firm` القديم؛ حُذف القديم
+    # مع طبقة المكتب في `accountant_portal`، فبقي هذا وحده يفتح موديول المكتب.
     #
-    # شجرةُ الحسابات وأنواعُ المستندات **بالإشارة** إلى بذرة القديم لا نسخةً
-    # منها: نسختان تفترقان عند أول تعديل، فيصير في المنصّة مكتبان بشجرةٍ
-    # مختلفة بلا قرارٍ يقول ذلك. وقناعُ المسارات نفسه (`_GOODS_MOVEMENT_HIDDEN_PATHS`):
-    # مكتبُ محاسبةٍ لا حركة بضاعة فيه.
+    # شجرةُ الحسابات وأنواعُ المستندات **بالإشارة** إلى ثوابت البذرة نفسها لا
+    # نسخةً منها: نسختان تفترقان عند أول تعديل، فيصير في المنصّة مكتبان بشجرةٍ
+    # مختلفة بلا قرارٍ يقول ذلك. وقناعُ المسارات نفسه
+    # (`_GOODS_MOVEMENT_HIDDEN_PATHS`): مكتبُ محاسبةٍ لا حركة بضاعة فيه.
     #
-    # `services: None` مقصود: خدماتُ `ACCOUNTING_FIRM_SERVICES` بذرةُ **القالب
-    # القديم** — لها أتعابُها المرتبطة بحسابات `4103`-`4106`. كتالوج خدمات
-    # المكتب الجديد يأتي في تذكرة الأتعاب، ولا يُزرع قبله شيءٌ لا شاشة له.
+    # `services: None` مقصود: كتالوج خدمات المكتب الجديد يأتي في تذكرة الأتعاب،
+    # ولا يُزرع قبله شيءٌ لا شاشة له.
     'accounting_office': {
         'key': 'accounting_office',
         'name': 'مكتب محاسبة (الجديد)',
@@ -305,19 +218,6 @@ COMPANY_TEMPLATES = {
         ),
         'coa': ACCOUNTING_FIRM_COA,
         'document_types': ACCOUNTING_FIRM_DOCUMENT_TYPES,
-        'masked_views': [],
-        'services': None,
-    },
-    'client_book': {
-        'key': 'client_book',
-        'name': 'دفتر عميل',
-        'icon': 'book-open-check',
-        'description': (
-            'دفتر مكتب محاسبة لزبونٍ يُمسَك بالسندات — نقدية وبنوك وذمم ومصاريف '
-            'تشغيلية، بلا مخزون ولا فواتير بيع أو شراء.'
-        ),
-        'coa': CLIENT_BOOK_COA,
-        'document_types': CLIENT_BOOK_DOCUMENT_TYPES,
         'masked_views': [],
         'services': None,
     },
@@ -343,38 +243,20 @@ COMPANY_TEMPLATES = {
 }
 
 
-# ── أين يُعرض كل قالب؟ ──────────────────────────────────────────────────
+# ── بابٌ واحد لكل قالب ──────────────────────────────────────────────────
 #
-# القوالب ليست قائمةً واحدة تُعرض في كل باب. لها بابان مختلفان:
+# ISSUE #291 — **قرارٌ صريح:** حُذفت هنا `BOOK_ONLY_TEMPLATES` و
+# `SELF_SERVE_TEMPLATES` و`DEFAULT_BOOK_TEMPLATE` و`assert_book_template`:
+# كانت قائمةً بقالب «الدفتر» الذي لا يُنشأ كشركة، وحُذف قالبُها الوحيد
+# (`client_book`) وبابُ `managed-books` مع طبقة المكتب القديمة.
 #
-# - **إنشاء شركة** (`companies/` و`companies/{id}/set-template/`): شركةُ المستخدم
-#   نفسه. `client_book` **لا مكان له هنا**: دفتر العميل ليس شركةً يملكها أحد،
-#   بل دفترٌ يفتحه مكتبُ محاسبةٍ لزبونه تحت حصّة `office.managed_books`،
-#   وشاشةُ بدايته وقناعه ووحدتُه المرخَّصة (issue #87) كلّها مبنيّة على وجود
-#   مكتبٍ فوقه. من أنشأه كشركةٍ مستقلّة حصل على دفترٍ بلا مكتب: بلا زرّ عودة،
-#   وبلا مكانٍ يظهر فيه.
-# - **فتح دفتر عميل** (`companies/{id}/managed-books/`): `client_book` وحده.
-#   القالبان الآخران يفتحان ERP كاملاً للزبون — وهو نقيض ما بُني له هذا الباب.
-BOOK_ONLY_TEMPLATES: frozenset[str] = frozenset({'client_book'})
-SELF_SERVE_TEMPLATES: tuple[str, ...] = tuple(
-    key for key in COMPANY_TEMPLATES if key not in BOOK_ONLY_TEMPLATES
-)
-DEFAULT_BOOK_TEMPLATE = 'client_book'
+# و`assert_self_serve_template` **بقيت وأُعيد كتابتها** لا حُذفت: لها منادون
+# فعليون (`TenantViewSet.create`/`set_template` و`switch_company_template`)،
+# وموضوعُها الباقي حقيقيّ — مفتاحٌ غير مسجَّل يُرفض عند الباب لا يُسقَط إلى
+# قالبٍ افتراضي.
 
 
 def assert_self_serve_template(template_key: str) -> None:
-    """قالبٌ يصلح لشركةٍ يملكها المستخدم — لا قالب دفترٍ يلزمه مكتبٌ فوقه."""
-    if template_key in BOOK_ONLY_TEMPLATES:
-        raise ValueError(
-            f'قالب «{COMPANY_TEMPLATES[template_key]["name"]}» لا يُنشأ كشركة '
-            'مستقلّة — يفتحه مكتب المحاسبة لزبونه من «دفاتر عملائي».'
-        )
-
-
-def assert_book_template(template_key: str) -> None:
-    """قالبٌ يصلح لدفتر زبونٍ يمسكه مكتب."""
-    if template_key not in BOOK_ONLY_TEMPLATES:
-        raise ValueError(
-            f'قالب «{COMPANY_TEMPLATES[template_key]["name"]}» يفتح نظاماً '
-            'كاملاً لا دفتراً — دفاتر العملاء تُفتح بقالب «دفتر عميل».'
-        )
+    """قالبٌ يصلح لشركةٍ يملكها المستخدم — أي مفتاحٍ مسجَّل في `COMPANY_TEMPLATES`."""
+    if template_key not in COMPANY_TEMPLATES:
+        raise ValueError(f'قالب الشركة «{template_key}» غير معروف.')

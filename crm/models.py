@@ -9,8 +9,8 @@
 `assigned_to`/`suggested_by` تشيران إلى `platform_ops.PlatformEmployee`
 بـ**مرجعٍ نصّيّ** (`"platform_ops.PlatformEmployee"`) — وهذا أسلوبُ جانغو المعتاد
 في تعريف مفتاحٍ أجنبيٍّ عبر التطبيقات، نفسُ النمط الموثَّق في `ARCHITECTURE.md`
-لمرجع `partners.Partner.managed_tenant` إلى
-`accountant_portal.AccountantEngagement`. وهو **ليس** تحايلاً على حارس العزل:
+ومثالُه الحيّ `partners.Partner.linked_account` إلى `accounting.Account`. وهو
+**ليس** تحايلاً على حارس العزل:
 `crm` عضوٌ معلَنٌ في `PLATFORM_CLUSTER_APPS`
 (`platform_ops/tests/test_isolation_guard.py`)، فاستيرادُ `platform_ops` صريحٌ
 ومسموحٌ في هذه الوحدة — والمفتاحُ الأجنبيُّ هنا يجعل الاعتمادَ قائماً في القاعدة

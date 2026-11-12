@@ -151,7 +151,7 @@ class OperationalAccountsTemplateAwareTest(APITestCase):
         Currency.objects.get_or_create(
             Code="ILS", defaults={"Name": "شيكل", "IsBaseCurrency": True}
         )
-        cls.tenant = create_company("مكتب محاسبة", cls.user, template="accounting_firm")
+        cls.tenant = create_company("مكتب محاسبة", cls.user, template="accounting_office")
 
     def test_seed_never_contained_logistics_partner_accounts(self):
         codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
@@ -173,7 +173,7 @@ class OperationalAccountsTemplateAwareTest(APITestCase):
         codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
         assert not self.LOGISTICS_PARTNER_CODES & codes
 
-    def test_heal_company_seed_command_respects_accounting_firm_template(self):
+    def test_heal_company_seed_command_respects_accounting_office_template(self):
         Account.objects.filter(tenant=self.tenant, code__in=["1107", "1110"]).delete()
         call_command("heal_company_seed", tenant=self.tenant.TenantID)
         codes = set(Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))

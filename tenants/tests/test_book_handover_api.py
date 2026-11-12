@@ -1,9 +1,13 @@
 """ISSUE #54 — مكتب المحاسبة: تسليم الدفاتر للعميل (نمط Xero).
 
-الملاحظة على الأثر — صفوف `Tenant.managed_by`، عضويات الدفتر، قائمة
-`managed-books`، وأسطر القيد/أرصدة الحسابات قبل التسليم وبعده — لا على
-استدعاء `create_handover_request`/`accept_handover_request` مباشرة ولا على
-شكلهما الداخلي.
+الملاحظة على الأثر — صفوف `Tenant.managed_by`، عضويات الدفتر، وأسطر
+القيد/أرصدة الحسابات قبل التسليم وبعده — لا على استدعاء
+`create_handover_request`/`accept_handover_request` مباشرة ولا على شكلهما
+الداخلي.
+
+ISSUE #291: الدفترُ المُدار يُنشأ هنا بالخدمة مباشرة (`create_company(...,
+managed_by=...)`) لأن باب `companies/{id}/managed-books/` حُذف مع طبقة المكتب
+القديمة. الدفاترُ المُدارة القائمة في الإنتاج تبقى، ومسارُ التسليم نفسه لم يُمسّ.
 """
 from datetime import timedelta
 
@@ -18,13 +22,10 @@ from core.plans import invalidate_limit_cache
 from partners.models import Partner
 from sales.models import SalesSettings
 from tenants.models import BookHandoverRequest, Currency, Tenant, UserCompanyMembership
+from tenants.services import create_company
 
 COMPANIES_URL = "/api/tenants/companies/"
 HANDOVER_URL = "/api/tenants/handover-requests/"
-
-
-def _managed_books_url(office_id):
-    return f"{COMPANIES_URL}{office_id}/managed-books/"
 
 
 def _accept_url(request_id):
@@ -52,14 +53,11 @@ class BookHandoverApiTestBase(APITestCase):
 
     def setUp(self):
         invalidate_limit_cache(self.office.pk)
-        self.client.force_authenticate(user=self.office_manager)
-        created = self.client.post(
-            _managed_books_url(self.office.pk),
-            {"CompanyName": "دفتر العميل"}, format="json",
+        self.book = create_company(
+            "دفتر العميل", self.office_manager, managed_by=self.office,
         )
-        self.assertEqual(created.status_code, 201, created.content)
-        self.book_id = created.json()["TenantID"]
-        self.book = Tenant.objects.get(pk=self.book_id)
+        self.book_id = self.book.pk
+        self.client.force_authenticate(user=self.office_manager)
 
     def _create_handover(self, **over):
         body = {"book_id": self.book_id, "client_username_or_email": self.client_user.username}
@@ -169,13 +167,13 @@ class HandoverAcceptanceEffectsTest(BookHandoverApiTestBase):
                 user=self.client_user, tenant_id=self.book_id, role="manager").exists()
         )
 
-    def test_book_leaves_the_office_managed_books_list_and_quota_frees(self):
+    def test_book_leaves_the_office_managed_books_set(self):
         self._accept()
-        self.client.force_authenticate(user=self.office_manager)
-        res = self.client.get(_managed_books_url(self.office.pk))
-        self.assertEqual(res.status_code, 200, res.content)
-        ids = {row["TenantID"] for row in res.json()}
-        self.assertNotIn(self.book_id, ids)
+        self.assertNotIn(
+            self.book_id,
+            set(Tenant.objects.filter(managed_by=self.office)
+                .values_list("pk", flat=True)),
+        )
         self.assertEqual(Tenant.objects.filter(managed_by=self.office).count(), 0)
 
     def test_office_access_survives_acceptance_until_explicitly_revoked(self):

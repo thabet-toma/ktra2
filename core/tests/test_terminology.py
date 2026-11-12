@@ -20,18 +20,6 @@ class TermFunctionTest(SimpleTestCase):
         self.assertEqual(term(general, "doc.sales_invoice"), "فاتورة مبيعات")
         self.assertEqual(term(general, "line.item"), "منتج")
 
-    def test_accounting_firm_sees_fee_invoice_and_service(self):
-        firm = _StubTenant("accounting_firm")
-        self.assertEqual(term(firm, "doc.sales_invoice"), "فاتورة أتعاب")
-        self.assertEqual(term(firm, "line.item"), "خدمة")
-
-    def test_client_book_sees_service_but_no_sales_invoice_override(self):
-        """`client_book` يخفي فاتورة المبيعات بالقناع الحيّ — لا حاجة لتجاوز اسمها."""
-        book = _StubTenant("client_book")
-        self.assertEqual(term(book, "line.item"), "خدمة")
-        # بلا تجاوز خاص، تسقط لافتراضي البذرة التجارية بلا رمي.
-        self.assertEqual(term(book, "doc.sales_invoice"), "فاتورة مبيعات")
-
     def test_missing_key_falls_back_to_the_key_itself_without_raising(self):
         general = _StubTenant("general")
         self.assertEqual(term(general, "doc.no-such-term"), "doc.no-such-term")
@@ -52,14 +40,6 @@ class TermFunctionTest(SimpleTestCase):
         self.assertEqual(payload["doc.payment_voucher"], "سند صرف")
         self.assertEqual(payload["line.item"], "منتج")
 
-    def test_terms_payload_reflects_template_overrides(self):
-        firm = _StubTenant("accounting_firm")
-        payload = terms_payload(firm)
-        self.assertEqual(payload["doc.sales_invoice"], "فاتورة أتعاب")
-        self.assertEqual(payload["line.item"], "خدمة")
-        # ما لا يتبدّل بالقالب يبقى كما هو — سند القبض واحد في كل القوالب.
-        self.assertEqual(payload["doc.receipt_voucher"], "سند قبض")
-
 
 class PermissionsMePayloadCarriesTermsTest(APITestCase):
     """المعجم يصل على حمولة `/api/permissions/me` نفسها — القرار 8 في #46: لا آلية ثالثة."""
@@ -77,12 +57,3 @@ class PermissionsMePayloadCarriesTermsTest(APITestCase):
         self.assertIn("terms", body)
         self.assertEqual(body["terms"]["doc.sales_invoice"], "فاتورة مبيعات")
         self.assertEqual(body["terms"]["line.item"], "منتج")
-
-    def test_accounting_firm_company_sees_fee_invoice_and_service(self):
-        user = User.objects.create_user(username="term-firm-owner", password="x")
-        tenant = create_company("مكتب محاسبة للمعجم", user, template="accounting_firm")
-        res = self.client.get("/api/permissions/me/", **self._as(user, tenant))
-        self.assertEqual(res.status_code, 200, res.content)
-        body = res.json()
-        self.assertEqual(body["terms"]["doc.sales_invoice"], "فاتورة أتعاب")
-        self.assertEqual(body["terms"]["line.item"], "خدمة")
