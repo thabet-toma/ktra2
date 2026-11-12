@@ -12,6 +12,9 @@
    `office.settings.manage`، وخيارُ الزبون بمفتاح `office.clients.write`.
 6. **«اليوم»**: عدّادُ `missing_docs` وفلترُه و`docs` لكل صفّ، وعددُ الاستعلامات
    لا يكبر بعدد الصفوف.
+7. **حفظُ المبلغ فِعلاً مستقلّاً (#286/ج-٢)**: المبلغُ يُكتب بلا مساسٍ بسجلّ
+   الوصول (`received_on`/`received_by`/`channel`)، والمبلغان **403** بلا
+   `office.amounts.view` بينما النسبةُ والطرفُ يُكتبان.
 """
 import datetime
 import json
@@ -550,6 +553,82 @@ class StatusApiTest(DocumentsApiTestCase):
         response = self.documents(self.other)
 
         self.assertEqual(response.status_code, 404, response.data)
+
+
+class AmountsApiTest(DocumentsApiTestCase):
+    """حفظُ مبلغ الورقة وحدَه — **لا يمسّ سجلَّ الوصول** (#286/ج-٢).
+
+    الطريقُ الوحيد قبل هذا الفعل كان ضغطَ «وصلت» من جديد، و`set_document_status`
+    يكتب `received_on = اليوم` و`received_by = المستخدم الحالي` **في كلّ نداء** —
+    فكلُّ مبلغٍ يُكتب بعد يوم الوصول يزوّر تاريخَه ومَن سجّله. والفعلُ المستقلّ
+    `POST …/amounts/` يفصل الحقلين: المبلغُ يُكتب، والوصولُ يبقى كما سُجّل.
+    """
+
+    def test_saving_the_amounts_keeps_the_received_record_of_yesterday(self):
+        yesterday = timezone.localdate() - datetime.timedelta(days=1)
+        row = self.make_rows(self.mine, codes=["il_bank_statements"])[0]
+        services.set_document_status(
+            row, status=DOCUMENT_STATUS_RECEIVED, channel="paper",
+            actor=self.owner, day=yesterday,
+        )
+        self.as_user(self.owner)
+
+        response = self.client.post(
+            f"{DOCUMENTS}{row.pk}/amounts/",
+            {
+                "amount": "300.00",
+                "tax_amount": "51.00",
+                "vat_rate": "17.00",
+                "side_party": "شركة الأمل",
+            },
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(Decimal(response.data["amount"]), Decimal("300.00"))
+        # الوصولُ كما سُجّل أمس: لا تاريخُ اليوم ولا فاعلٌ آخر ولا قناةٌ بديلة.
+        self.assertEqual(response.data["received_on"], yesterday.isoformat())
+        self.assertEqual(response.data["received_by_name"], self.owner.username)
+        self.assertEqual(response.data["channel"], "paper")
+        row.refresh_from_db()
+        self.assertEqual(row.received_on, yesterday)
+        self.assertEqual(row.received_by_id, self.owner.pk)
+        self.assertEqual(row.channel, "paper")
+        self.assertEqual(row.amount, Decimal("300.00"))
+        self.assertEqual(row.tax_amount, Decimal("51.00"))
+        self.assertEqual(row.side_party, "شركة الأمل")
+
+    def test_a_member_without_the_amounts_key_is_403_and_writes_the_rest(self):
+        """**403 على المبلغين**، والنسبةُ والطرفُ يُكتبان — نسبةٌ واسمٌ لا مال."""
+        row = self.make_rows(self.mine, codes=["il_bank_statements"])[0]
+        self.as_user(self.accountant)
+
+        for key in ("amount", "tax_amount"):
+            with self.subTest(field=key):
+                blocked = self.client.post(
+                    f"{DOCUMENTS}{row.pk}/amounts/",
+                    {key: "100.00"},
+                    format="json", **self.headers(),
+                )
+
+                self.assertEqual(blocked.status_code, 403, blocked.data)
+                row.refresh_from_db()
+                self.assertIsNone(row.amount)
+                self.assertIsNone(row.tax_amount)
+
+        allowed = self.client.post(
+            f"{DOCUMENTS}{row.pk}/amounts/",
+            {"vat_rate": "17.00", "side_party": "شركة الأمل"},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(allowed.status_code, 200, allowed.data)
+        row.refresh_from_db()
+        self.assertEqual(row.vat_rate, Decimal("17.00"))
+        self.assertEqual(row.side_party, "شركة الأمل")
+        # والمبلغان يخرجان مقنَّعين لمن لا يملك المفتاح.
+        self.assertIsNone(allowed.data["amount"])
+        self.assertIsNone(allowed.data["tax_amount"])
 
 
 class FileApiTest(DocumentsApiTestCase):

@@ -484,6 +484,30 @@ class DocumentStatusSerializer(serializers.Serializer):
     )
 
 
+class DocumentAmountsSerializer(serializers.Serializer):
+    """حقولُ مبلغ الورقة وحدها (#286/ج-٢) — **بلا `status`/`channel`**.
+
+    الفعلُ المستقلُّ `POST …/amounts/` يكتب المبلغَ ولا يمسّ سجلَّ الوصول: مسارٌ
+    ثانٍ يمرّ بـ`set_document_status` يكتب `received_on = اليوم` و`received_by =
+    الحالي` في كلّ نداء، فمبلغٌ يُكتب بعد يوم الوصول يزوّر تاريخَه ومَن سجّله.
+    والغيابُ لا يمحو (`set_document_amounts`)، والتحقّقُ الدلاليّ فيها: السالبُ
+    400، والنسبةُ بين 0 و100، وورقةٌ في حركةٍ حيّة ترفض تعديلَ مبلغها.
+    """
+
+    amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True,
+    )
+    tax_amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True,
+    )
+    vat_rate = serializers.DecimalField(
+        max_digits=7, decimal_places=4, required=False, allow_null=True,
+    )
+    side_party = serializers.CharField(
+        required=False, allow_blank=True, max_length=200,
+    )
+
+
 class DefaultTrueBooleanField(serializers.BooleanField):
     """مربّعُ اختيارٍ **غائبٌ** في multipart يعني «نعم» — كـ`is_copy`.
 

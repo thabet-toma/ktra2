@@ -21,6 +21,7 @@ import {
   listBookEntries,
   listDocumentFiles,
   setClientDocumentChoice,
+  setDocumentAmounts,
   setDocumentStatus,
   uploadDocumentFile,
   type BookEntryRow,
@@ -60,6 +61,10 @@ import {
 
 /** حالةُ اللوح: أربعةُ أزرارٍ للحالة، وواحدُ سؤالٍ للقناة بعد «وصلت». */
 const RECEIVED_STATUSES = new Set(['received', 'partial']);
+
+/** سببُ قفل مبلغ ورقةٍ مُدخَلة — التصحيحُ بحركةٍ عكسية لا بتعديل الورقة. */
+const ENTERED_AMOUNTS_NOTE =
+  'مُدخَلةٌ في حركةٍ حيّة — المبالغُ للقراءة وحدها، والتصحيحُ بحركةٍ عكسية.';
 
 /** مسوّدةُ مبلغٍ فارغة — لا صفرٌ مخترعٌ لورقةٍ لم يُكتب مبلغها. */
 const EMPTY_AMOUNTS: DocumentAmountDraft = documentAmountDraft(null);
@@ -182,6 +187,8 @@ export const OfficeClientDocuments: React.FC<{
   const [filesLoading, setFilesLoading] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // صفٌّ يُحفظ مبلغه وحدَه — منفصلٌ عن `saving` كي لا تُقفل أزرارُ الحالة معه.
+  const [amountsSaving, setAmountsSaving] = useState<number | null>(null);
   const [upload, setUpload] = useState({ ...EMPTY_UPLOAD });
   const [uploadBusy, setUploadBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement | null>(null);
@@ -240,6 +247,15 @@ export const OfficeClientDocuments: React.FC<{
       }));
     },
     [],
+  );
+
+  /** هل بقي حقلُ مبلغٍ لم يُحفظ؟ الزرُّ يظهر بهذا وحده — وإلا فلا شيءَ يُكتب. */
+  const amountsChanged = useCallback(
+    (rowId: number): boolean => Object.keys(documentAmountsWrite(
+      valueBase[rowId] ?? EMPTY_AMOUNTS,
+      valueDrafts[rowId] ?? EMPTY_AMOUNTS,
+    )).length > 0,
+    [valueBase, valueDrafts],
   );
 
   const gridRows = useMemo(
@@ -330,6 +346,33 @@ export const OfficeClientDocuments: React.FC<{
       return;
     }
     applyStatus(rowId, status);
+  };
+
+  /**
+   * «احفظ المبلغ» — الفعلُ المستقلّ (#286/ج-٢): المبلغُ يُكتب وحدَه.
+   *
+   * الطريقُ الوحيد قبل هذا كان ضغطَ «وصلت» من جديد، وذلك يكتب `received_on`
+   * و`received_by` بالمستخدم الحالي في كلّ نداء — فيُزوَّر سجلُّ وصولٍ سُجّل
+   * أمس. والفعلُ الجديد لا يمسّ الحالةَ ولا القناة، فلا يُرسَل معه شيءٌ منهما.
+   */
+  const saveAmounts = async (rowId: number) => {
+    const values = documentAmountsWrite(
+      valueBase[rowId] ?? EMPTY_AMOUNTS,
+      valueDrafts[rowId] ?? EMPTY_AMOUNTS,
+    );
+    if (Object.keys(values).length === 0) return;
+    setAmountsSaving(rowId);
+    try {
+      const saved = await setDocumentAmounts(rowId, values);
+      remember(saved.row_id, saved);
+      toast('حُفظ مبلغ الورقة', 'success');
+      load();
+    } catch (failure) {
+      // نصُّ الخادم كما هو: «مُدخَلةٌ في حركةٍ حيّة…» تقول كيف تُصحَّح.
+      toast(humanizeThrown(failure, 'تعذّر حفظ مبلغ الورقة.'), 'error');
+    } finally {
+      setAmountsSaving(null);
+    }
   };
 
   const sendUpload = async () => {
@@ -638,7 +681,7 @@ export const OfficeClientDocuments: React.FC<{
                 />
                 {selectedEntered ? (
                   <p className="mt-1 text-[10px] font-medium text-amber-800 dark:text-amber-300">
-                    مُدخَلةٌ في حركةٍ حيّة — المبالغُ للقراءة وحدها، والتصحيحُ بحركةٍ عكسية.
+                    {ENTERED_AMOUNTS_NOTE}
                   </p>
                 ) : null}
                 {!canSeeAmounts ? (
@@ -646,6 +689,18 @@ export const OfficeClientDocuments: React.FC<{
                     المبلغُ والضريبةُ محجوبان: صلاحية «يرى المبالغ» غير ممنوحة لدورك —
                     والنسبةُ والطرفُ يُكتبان.
                   </p>
+                ) : null}
+                {/* #286/ج-٢: المبلغُ يُحفظ وحدَه — بلا حالةٍ تُعيد كتابة سجلّ الوصول. */}
+                {selectedRowId !== null && amountsChanged(selectedRowId) ? (
+                  <button
+                    type="button"
+                    onClick={() => void saveAmounts(selectedRowId)}
+                    disabled={amountsSaving === selectedRowId || selectedEntered}
+                    title={selectedEntered ? ENTERED_AMOUNTS_NOTE : undefined}
+                    className={`mt-2 ${officePrimaryButtonClass} disabled:opacity-50`}
+                  >
+                    {amountsSaving === selectedRowId ? '…' : 'احفظ المبلغ'}
+                  </button>
                 ) : null}
               </div>
             ) : null}
@@ -830,8 +885,20 @@ export const OfficeClientDocuments: React.FC<{
                       />
                       {booked.has(row.row_id) ? (
                         <p className="mt-1 text-[10px] font-medium text-amber-800 dark:text-amber-300">
-                          مُدخَلةٌ في حركةٍ حيّة — المبالغُ للقراءة وحدها، والتصحيحُ بحركةٍ عكسية.
+                          {ENTERED_AMOUNTS_NOTE}
                         </p>
+                      ) : null}
+                      {/* #286/ج-٢: الورقةُ السنوية تحفظ مبلغها بالزرّ نفسِه. */}
+                      {amountsChanged(row.row_id) ? (
+                        <button
+                          type="button"
+                          onClick={() => void saveAmounts(row.row_id)}
+                          disabled={amountsSaving === row.row_id || booked.has(row.row_id)}
+                          title={booked.has(row.row_id) ? ENTERED_AMOUNTS_NOTE : undefined}
+                          className={`mt-2 ${officePrimaryButtonClass} disabled:opacity-50`}
+                        >
+                          {amountsSaving === row.row_id ? '…' : 'احفظ المبلغ'}
+                        </button>
                       ) : null}
                     </div>
                   ) : null}
