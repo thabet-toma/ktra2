@@ -111,11 +111,15 @@ REMINDER_DOCUMENTS = "documents"
 REMINDER_DEADLINE = "deadline"
 REMINDER_BALANCE = "balance"
 REMINDER_APPOINTMENT = "appointment"
+#: #283/ب: إشعارُ القبض — بندٌ لكل دفعةٍ دخلت اليوم يُعلم بها الزبون. وليس
+#: تذكيراً بدَينٍ (`balance`) بل إثباتَ استلامٍ: اتجاهُه «وصلنا» لا «عليك».
+REMINDER_FEE_RECEIPT = "fee_receipt"
 REMINDER_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
     (REMINDER_DOCUMENTS, "أوراق ناقصة"),
     (REMINDER_DEADLINE, "موعد رسمي قريب"),
     (REMINDER_BALANCE, "اللي عليه"),
     (REMINDER_APPOINTMENT, "تذكير موعد"),
+    (REMINDER_FEE_RECEIPT, "إشعار قبض"),
 )
 REMINDER_TYPES: tuple[str, ...] = tuple(key for key, _label in REMINDER_TYPE_CHOICES)
 REMINDER_TYPE_LABELS: dict[str, str] = dict(REMINDER_TYPE_CHOICES)

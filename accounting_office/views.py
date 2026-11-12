@@ -88,10 +88,12 @@ from accounting_office.serializers import (
     DocumentStatusSerializer,
     FeeDraftApproveSerializer,
     FeeDraftRowSerializer,
+    FeeDocumentShareSerializer,
     FeeExtraServiceWriteSerializer,
     FeeLedgerQuerySerializer,
     FeePaymentWriteSerializer,
     FeeServicePriceWriteSerializer,
+    FeeStatementShareSerializer,
     FeeSubscriptionWriteSerializer,
     FeeWriteOffWriteSerializer,
     ObligationAmountSerializer,
@@ -159,6 +161,17 @@ def parse_iso_date(raw, field):
     if day is None:
         raise ValidationError({field: "تاريخٌ غير صالح — الصيغة YYYY-MM-DD."})
     return day
+
+
+def parse_optional_iso_date(raw, field):
+    """تاريخٌ **اختياريّ** بصيغة ISO — الفراغُ غيابٌ لا خطأ، والفسادُ 400.
+
+    كشفُ الحساب يُطبع بفترةٍ أو بلا فترة (كلُّ الحركات)، فحدُّ الفترة اختياريّ
+    بينما الغيابُ في نقاطٍ أخرى (`parse_iso_date`) خطأٌ صريح.
+    """
+    if not (raw or "").strip():
+        return None
+    return parse_iso_date(raw, field)
 
 
 class OfficeModuleViewSet(viewsets.GenericViewSet):
@@ -2567,20 +2580,111 @@ class OfficeFeePaymentViewSet(OfficeModuleViewSet):
         )
         return Response(row, status=status.HTTP_201_CREATED)
 
+    # ── المستندان (#283/ب): الإشعارُ للطباعة والرابطُ للمشاركة ──────────────
+    #
+    # **الطباعةُ بياناتٌ لا HTML**: الواجهةُ تُصيِّر الصفحة بنمط
+    # `frontend_v2/utils/printReport.ts` كما تفعل كلّ شاشات الطباعة، لأن طلباً
+    # في تبويبٍ جديد لا يحمل ترويسةَ المصادقة (`Authorization`/`X-Tenant-Id`) —
+    # صفحةُ الخادم المطبوعة كانت ستردّ 401 في متصفّح المستخدم.
+    #
+    # والرؤيةُ أوّلاً فيأخذ من لا يرى الدفعة **404**، ثم مفتاحُ الكتابة فيأخذ
+    # القارئُ **403** — كسائر أفعال الموديول.
+    lookup_value_regex = r"[0-9]+"
+
+    @action(detail=True, methods=["get"], url_path="print")
+    def print_receipt(self, request, pk=None):
+        """`GET fees/payments/<pk>/print/` — بياناتُ إشعار القبض المطبوع.
+
+        **ولا رقمَ يُستهلك هنا**: `payments.receipt_payload` تقرأ
+        `receipt_number` المخزَّن عند الدفع وحده، وتكرارُ الطلب يُعيده كما هو.
+        """
+        payment = self.get_object()
+        self.require_write()
+        return Response(payments.receipt_payload(
+            self.tenant, payment, masked=payments.amounts_masked(
+                self.tenant, request.user,
+            ),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="share")
+    def share_receipt(self, request, pk=None):
+        """`POST fees/payments/<pk>/share/` — رابطٌ عامٌّ حيٌّ `{url, expires_at}`."""
+        payment = self.get_object()
+        self.require_write()
+        serializer = FeeDocumentShareSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            payments.share_payment_receipt(
+                self.tenant,
+                payment,
+                user=request.user,
+                days=serializer.validated_data.get("days"),
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
 
 class OfficeFeeLedgerViewSet(OfficeModuleViewSet):
     """كشفُ الحساب — الفواتيرُ المعتمدةُ والدفعات في حمولةٍ واحدة.
 
     الفلاترُ (`client` · `state` · `q`) والترقيمُ (`page` · `page_size`) على
     الاستعلام لا في بايثون؛ والبناءُ كلُّه في `payments.ledger_payload`.
+
+    **ومعه مستندا الكشف (#283/ب)**: `print/` بياناتُ الورقة للطباعة، و`share/`
+    يُصدِر صفَّ `FeeStatement` ويعيد رابطه العامّ. والقراءةُ بلا مفتاح كتابة
+    (كما القائمة)، والرابطُ بمفتاحها.
     """
 
     serializer_class = FeeLedgerQuerySerializer
-    http_method_names = ["get", "head", "options"]
+    http_method_names = ["get", "post", "head", "options"]
+    lookup_value_regex = r"[0-9]+"
 
     def list(self, request, *args, **kwargs):
         return Response(
             payments.ledger_payload(
                 self.tenant, user=request.user, params=request.query_params,
             ),
+        )
+
+    @action(detail=False, methods=["get"], url_path="print")
+    def print_statement(self, request):
+        """`GET fees/ledger/print/?client=&period_from=&period_to=` — ورقةُ الكشف.
+
+        **والزبونُ من مصدر الرؤية الواحد** فيأخذ من لا يراه **404**، والقناعُ
+        يطال الرصيدَ الجاري والختاميَّ كما يطال صفوفَ الحركة.
+        """
+        params = request.query_params
+        raw_client = (params.get("client") or "").strip()
+        if not raw_client:
+            raise ValidationError({"client": "معرّفُ الزبون مطلوب لكشف الحساب."})
+        try:
+            client_id = int(raw_client)
+        except (TypeError, ValueError):
+            raise ValidationError({"client": "معرّفٌ غير صالح."}) from None
+        client = _visible_client(self.tenant, request.user, client_id)
+        return Response(payments.statement_payload(
+            self.tenant,
+            client,
+            period_from=parse_optional_iso_date(params.get("period_from"), "period_from"),
+            period_to=parse_optional_iso_date(params.get("period_to"), "period_to"),
+            masked=payments.amounts_masked(self.tenant, request.user),
+        ))
+
+    @action(detail=False, methods=["post"], url_path="share")
+    def share_statement(self, request):
+        """`POST fees/ledger/share/` — `{client, period_from?, period_to?}` ⇒ رابط."""
+        serializer = FeeStatementShareSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        client = _visible_client(self.tenant, request.user, data["client"])
+        self.require_write()
+        return Response(
+            payments.share_new_client_statement(
+                self.tenant,
+                client,
+                period_from=data.get("period_from"),
+                period_to=data.get("period_to"),
+                user=request.user,
+            ),
+            status=status.HTTP_201_CREATED,
         )

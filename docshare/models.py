@@ -59,6 +59,13 @@ DOC_STOCKTAKE_COUNT = "stocktake_count"
 #: واحد («عليك» أحمر / «إلك» أخضر / الرماديُّ قريبٌ من الصفر). انظر
 #: `documents.accounting_docs`.
 DOC_PAYMENT_NOTICE = "payment_notice"
+#: #283/ب: إشعارُ قبضٍ لدفعة أتعاب — رقمُه المخزَّن ومبلغُه وتخصيصاتُه وما بقي
+#: على الزبون. المصدرُ `accounting_office.FeePayment`، والبناءُ في
+#: `payments.receipt_payload` (لا نسخةَ ثانية في `docshare`).
+DOC_FEE_RECEIPT = "fee_receipt"
+#: #283/ب: كشفُ حسابٍ لفترة — حركاتُ الزبون الثلاث برصيدٍ جارٍ وختاميّ من
+#: `payments.statement_payload`. المصدرُ صفُّ `FeeStatement` (client + period).
+DOC_FEE_STATEMENT = "fee_statement"
 DOC_TYPE_CHOICES = [
     (DOC_SALES_INVOICE, "فاتورة بيع"),
     (DOC_SALES_QUOTATION, "عرض سعر"),
@@ -78,6 +85,8 @@ DOC_TYPE_CHOICES = [
     (DOC_WARRANTY_CERTIFICATE, "شهادة كفالة"),
     (DOC_STOCKTAKE_COUNT, "رابط عدّ جرد"),
     (DOC_PAYMENT_NOTICE, "إشعار دفع"),
+    (DOC_FEE_RECEIPT, "إشعار قبض"),
+    (DOC_FEE_STATEMENT, "كشف حساب"),
 ]
 
 #: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم

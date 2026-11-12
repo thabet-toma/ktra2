@@ -31,12 +31,14 @@
 from django.template.loader import render_to_string
 
 from accounting_office.models import Obligation
+from core.terminology import term
 from docshare.documents._contract import (
     AUDIENCE_CUSTOMER,
     TONE_DANGER,
     TONE_MUTED,
     TONE_OK,
     VALUE_DATE,
+    VALUE_MONEY,
     company_card,
     meta,
     payload,
@@ -184,6 +186,183 @@ def payment_notice_doc_ids(tenant, user):
     ).values("pk")
 
 
+# ── إشعارُ القبض وكشفُ الحساب (#283/ب) ───────────────────────────────────────
+#
+# **البناءُ في `accounting_office.payments` لا هنا**: الرقمُ والتخصيصُ و«اللي
+# عليه» والرصيدُ الجاري أحكامُ مالٍ في الموديول الذي يملكها، ونسخةٌ ثانية منها في
+# `docshare` تفترق عن الأولى بأوّل تخصيص. فحدودُ هذا الملفّ — كما في
+# `payment_notice` — **الورقة** وحدها: ما يُقرأ من الصفّ، وما يُصيَّر للزبون.
+def _payments():
+    """استيرادٌ كسول: `payments` يجرّ خدماتِ المكتب ونماذجها (نمط `_appointments`)."""
+    from accounting_office import payments as office_payments
+
+    return office_payments
+
+
+def load_fee_receipt(tenant_id: int, doc_id: int):
+    """الدفعةُ التي يفتح الإشعارُ سندَها — أو `None` لمكتبٍ آخر أو صفٍّ ذهب.
+
+    **ولا فلترةَ رؤيةٍ هنا**: الصفحةُ العامة يعرّفها توكنُها لا مستخدمُها،
+    والنطاقُ في `fee_receipt_doc_ids` لسطح الإدارة وحده (كما في الإشعار).
+    """
+    from accounting_office.models import FeePayment
+
+    return (
+        FeePayment.objects
+        .select_related("client", "tenant")
+        .filter(pk=doc_id, tenant_id=tenant_id)
+        .first()
+    )
+
+
+def load_fee_statement(tenant_id: int, doc_id: int):
+    """صفُّ الكشف الذي يُعنوِن الورقة — فترتُه وحدها تُقرأ منه، والأرقامُ تُحسب."""
+    from accounting_office.models import FeeStatement
+
+    return (
+        FeeStatement.objects
+        .select_related("client", "tenant")
+        .filter(pk=doc_id, tenant_id=tenant_id)
+        .first()
+    )
+
+
+def _receipt_of(payment) -> dict:
+    """بياناتُ الإشعار من مصدرها الواحد — بلا قناعٍ هنا: الورقةُ للزبون."""
+    return _payments().receipt_payload(payment.tenant, payment, masked=False)
+
+
+def _statement_of(statement) -> dict:
+    return _payments().statement_payload(
+        statement.tenant,
+        statement.client,
+        period_from=statement.period_from,
+        period_to=statement.period_to,
+        masked=False,
+    )
+
+
+def build_fee_receipt(payment) -> dict:
+    """حمولةُ العقد العامّ للإشعار — المبلغُ المقبوض وما بقي على الزبون.
+
+    `show_lines=False`: جدولُ `share.html` أعمدةُ كميةٍ وسعرٍ وضريبة، وتخصيصاتُ
+    الدفعة ليست بنودَ بيع. تفصيلُها في `page_fee_receipt` وحدها.
+    """
+    receipt = _receipt_of(payment)
+    return payload(
+        kind="fee_receipt",
+        title=receipt["title"],
+        number=receipt["number"],
+        date=receipt["date"],
+        status_label="مدفوع",
+        status_tone=TONE_OK,
+        party_title="الزبون",
+        party=receipt["client"]["name"],
+        currency=None,
+        meta_rows=[
+            meta("رقم الإشعار", receipt["number"]),
+            meta("طريقة الدفع", receipt["method_label"]),
+            meta("الباقي على الزبون", receipt["due"]),
+        ],
+        lines=[],
+        show_lines=False,
+        show_line_prices=False,
+        totals_rows=[total("المبلغ المقبوض", receipt["amount"], strong=True)],
+        grand_total=receipt["amount"],
+        notes=receipt["note"],
+    )
+
+
+def build_fee_statement(statement) -> dict:
+    """حمولةُ العقد العامّ للكشف — رصيدُ أول المدة والحركاتُ والرصيدُ الختامي."""
+    sheet = _statement_of(statement)
+    invoice_label = term(statement.tenant, "doc.sales_invoice")
+    return payload(
+        kind="fee_statement",
+        title=sheet["title"],
+        number="",
+        date=sheet["to"] or "",
+        status_label="كشف حساب",
+        status_tone=TONE_MUTED,
+        party_title="الزبون",
+        party=sheet["client"]["name"],
+        currency=None,
+        meta_rows=[
+            meta("من تاريخ", sheet["from"], VALUE_DATE),
+            meta("إلى تاريخ", sheet["to"], VALUE_DATE),
+            meta("الباقي على الزبون اليوم", sheet["due"], VALUE_MONEY),
+        ],
+        lines=[],
+        show_lines=False,
+        show_line_prices=False,
+        totals_rows=[
+            total("رصيد أول المدة", sheet["opening_balance"]),
+            total(invoice_label, sheet["totals"]["invoices"]),
+            total("دفعات", sheet["totals"]["payments"]),
+            total("شطوب", sheet["totals"]["write_offs"]),
+            total("الرصيد الختامي", sheet["closing_balance"], strong=True),
+        ],
+        grand_total=sheet["closing_balance"],
+    )
+
+
+def page_fee_receipt(payment, share) -> str:
+    """ورقةُ إشعار القبض المصيَّرة — الرقمُ المخزَّن، والطريقةُ، والشيكُ، والباقي."""
+    receipt = _receipt_of(payment)
+    return render_to_string(
+        "docshare/fee_receipt.html",
+        {
+            "title": receipt["title"],
+            "company": company_card(share.tenant),
+            "receipt": receipt,
+        },
+    )
+
+
+def page_fee_statement(statement, share) -> str:
+    """ورقةُ كشف الحساب المصيَّرة — الحركاتُ الثلاث برصيدٍ جارٍ وأرصدةِ الرأس."""
+    return render_to_string(
+        "docshare/fee_statement.html",
+        {
+            "title": _payments().STATEMENT_TITLE,
+            "company": company_card(share.tenant),
+            "sheet": _statement_of(statement),
+        },
+    )
+
+
+def _visible_fee_clients(tenant, user):
+    """زبائنُ هذا العضو في مكتب المحاسبة — مصدرُ الرؤية الواحد، باستيرادٍ كسول."""
+    from accounting_office import services as office_services
+
+    return office_services.visible_clients(tenant, user).values("pk")
+
+
+def fee_receipt_doc_ids(tenant, user):
+    """دفعاتُ زبائنَ يراها العضو — **نطاقُ النوع في سطح الإدارة** (#283/ب).
+
+    بلا هذا النطاق كان محاسبٌ بلا `office.clients.all` يأخذ — من قائمة أنواع
+    المستندات — توكنَ إشعار كلّ دفعةٍ في الشركة ويُبطلها، بمعرّفاتٍ متسلسلةٍ
+    تُخمَّن. ودفعةُ مكتبٍ آخر **404** من العزل نفسه.
+    """
+    from accounting_office.models import FeePayment
+
+    return FeePayment.objects.filter(
+        tenant=tenant,
+        client_id__in=_visible_fee_clients(tenant, user),
+    ).values("pk")
+
+
+def fee_statement_doc_ids(tenant, user):
+    """كشوفُ زبائنَ يراها العضو — النطاقُ نفسه، على صفوف `FeeStatement`."""
+    from accounting_office.models import FeeStatement
+
+    return FeeStatement.objects.filter(
+        tenant=tenant,
+        client_id__in=_visible_fee_clients(tenant, user),
+    ).values("pk")
+
+
 ACCOUNTING_DOC_TYPES = {
     "payment_notice": {
         "label": "إشعار دفع",
@@ -205,5 +384,31 @@ ACCOUNTING_DOC_TYPES = {
         "module": "accounting_office",
         #: **ونطاقُه في سطح الإدارة** (#285/م٣): انظر `payment_notice_doc_ids`.
         "scope": payment_notice_doc_ids,
+    },
+    #: #283/ب: إشعارُ قبضِ دفعة — الرقمُ المخزَّن يُقرأ ولا يُولَّد عند العرض.
+    "fee_receipt": {
+        "label": "إشعار قبض",
+        "loader": load_fee_receipt,
+        "builder": build_fee_receipt,
+        #: صلاحيةُ نوع الإشعار نفسها: ورقةُ زبونٍ يفتحها الزبون، ومَن يكتب
+        #: بياناته يملك ما يُرسَل إليه. والإنشاءُ من سطح المكتب وحده (400 هنا).
+        "permission": "office.clients.write",
+        "audience": AUDIENCE_CUSTOMER,
+        "decision": None,
+        "page": page_fee_receipt,
+        "module": "accounting_office",
+        "scope": fee_receipt_doc_ids,
+    },
+    #: #283/ب: كشفُ حساب زبونٍ لفترة — ورقةٌ مالية كاملةُ الأرصدة.
+    "fee_statement": {
+        "label": "كشف حساب",
+        "loader": load_fee_statement,
+        "builder": build_fee_statement,
+        "permission": "office.clients.write",
+        "audience": AUDIENCE_CUSTOMER,
+        "decision": None,
+        "page": page_fee_statement,
+        "module": "accounting_office",
+        "scope": fee_statement_doc_ids,
     },
 }

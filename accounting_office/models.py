@@ -40,6 +40,8 @@ from accounting_office.settings_registry import (
     REMINDER_BALANCE as REMINDER_BALANCE,
     REMINDER_DEADLINE as REMINDER_DEADLINE,
     REMINDER_DOCUMENTS as REMINDER_DOCUMENTS,
+    #: #283/ب: إشعارُ القبض — نوعُ تذكيرٍ خامس، معرَّفٌ في السجلّ للسبب نفسه.
+    REMINDER_FEE_RECEIPT as REMINDER_FEE_RECEIPT,
     REMINDER_TYPE_CHOICES as REMINDER_TYPE_CHOICES,
     REMINDER_TYPE_LABELS as REMINDER_TYPE_LABELS,
     REMINDER_TYPES as REMINDER_TYPES,
@@ -463,6 +465,7 @@ class ClientReminderRecipient(models.Model):
     REMINDER_DEADLINE = REMINDER_DEADLINE
     REMINDER_BALANCE = REMINDER_BALANCE
     REMINDER_APPOINTMENT = REMINDER_APPOINTMENT
+    REMINDER_FEE_RECEIPT = REMINDER_FEE_RECEIPT
     REMINDER_TYPE_CHOICES = REMINDER_TYPE_CHOICES
     REMINDER_TYPES: tuple[str, ...] = REMINDER_TYPES
 
@@ -596,6 +599,21 @@ REMINDER_DEFAULT_TEXTS: dict[str, dict[str, str]] = {
             "שלום {client_name},\n"
             "תזכורת לפגישה במשרד ביום {due_date}.\n"
             "אם המועד לא מתאים — דברו איתנו ונשנה אותו.\n"
+            "{office_name}"
+        ),
+    },
+    #: #283/ب: إشعارُ قبض — النصُّ يذكر الاستلام، و**سطرُ الرقم والمبلغ والباقي
+    #: يُلحَق به من الخادم** (`payments.fee_receipt_detail`): رقمُ الإشعار ليس
+    #: رمزاً من `REMINDER_PLACEHOLDERS`، وهو رقمُ مستندٍ لا يكتبه المكتب في قالب.
+    REMINDER_FEE_RECEIPT: {
+        "ar": (
+            "أهلاً {client_name}،\n"
+            "وصلنا منك {amount} اليوم {due_date}، وهذا إشعارُنا باستلامها.\n"
+            "{office_name}"
+        ),
+        "he": (
+            "שלום {client_name},\n"
+            "קיבלנו ממך {amount} ביום {due_date} — זהו אישור הקבלה.\n"
             "{office_name}"
         ),
     },
@@ -1880,11 +1898,15 @@ OBLIGATION_BADGE_LATE_INTERNAL = "late_internal"
 #: #278: «ناقصه أوراق» — **شارةٌ إضافية** تُضاف فوق واحدة التأخير ولا تُزاحمها:
 #: التأخيرُ سؤالٌ عن الموعد، وهذه عن الورق، وصفٌّ قد يستحقّ الاثنين معاً.
 OBLIGATION_BADGE_MISSING_DOCS = "missing_docs"
+#: #283/ب: «قبضٌ وصل» — شارةُ بند إشعار القبض في «جاهز للإرسال». خضراءُ لا
+#: كهرمانيّة: البندُ خبرُ مالٍ دخل لا موعدٌ يقترب، ولا يتنافس مع شارات التأخير.
+OBLIGATION_BADGE_PAYMENT_RECEIVED = "payment_received"
 OBLIGATION_BADGE_LABELS: dict[str, str] = {
     OBLIGATION_BADGE_NEAR: "قريب هالأسبوع",
     OBLIGATION_BADGE_LATE: "متأخّر رسمي",
     OBLIGATION_BADGE_LATE_INTERNAL: "متأخّر داخلي",
     OBLIGATION_BADGE_MISSING_DOCS: "ناقصه أوراق",
+    OBLIGATION_BADGE_PAYMENT_RECEIVED: "قبضٌ وصل",
 }
 
 
@@ -4058,4 +4080,62 @@ class FeeWriteOff(models.Model):
         if self.draft_id:
             self.tenant_id = self.draft.tenant_id
         assert_positive_fee_amount(self.amount)
+        super().save(*args, **kwargs)
+
+
+class FeeStatement(models.Model):
+    """كشفُ حسابٍ صدر للزبون بفترةٍ معلومة — **صفٌّ صغيرٌ يعطي المستندَ هويّته**.
+
+    `DocumentShare` يعنون المستندَ بـ`(doc_type, doc_id)` وحدهما، وكشفُ الحساب
+    ليس صفّاً مالياً بل **قراءةٌ** لدفعات الزبون وفواتيره وشطوبه. فبلا صفٍّ
+    يُحفظ، ينفتح الرابطُ على «الحساب الآن» لا على الفترة التي طُبع فيها — ويوم
+    تُسجَّل دفعةٌ جديدة يتغيّر رقمٌ في ورقةٍ بيد الزبون. هذا الصفُّ يجمّد
+    الفترةَ وحدها (لا الأرقام: تلك تُقرأ من مصدرها الواحد `payments`)، فورقةُ
+    آذار تبقى ورقةَ آذار ولو قُرئت في أيلول (انحرافٌ معلَن كما في `#285`).
+
+    **ولا حقلَ مبلغٍ هنا** ولا رصيد: المالُ كلُّه مشتقٌّ من الحركات عند القراءة
+    (`payments.client_due` الصيغةُ الواحدة)، ونسخةٌ مخزَّنةٌ ثانية تفترق عن
+    الأولى بأوّل دفعة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_statements",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="fee_statements",
+        verbose_name="الزبون",
+    )
+    period_from = models.DateField(verbose_name="من تاريخ")
+    period_to = models.DateField(verbose_name="إلى تاريخ")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_fee_statements",
+        verbose_name="أصدره",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإصدار")
+
+    class Meta:
+        verbose_name = "كشف حساب أتعاب"
+        verbose_name_plural = "كشوف حسابات الأتعاب"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client", "created_at"],
+                name="office_fee_statement_client",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}@{self.period_from}..{self.period_to}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
         super().save(*args, **kwargs)

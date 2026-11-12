@@ -104,6 +104,9 @@ SAMPLE_FIXTURES = {
     "purchase_rfq": "purchase_rfq",
     "stocktake_count": "stocktake_count",
     "payment_notice": "payment_notice",
+    # #283/ب: مستندا الأتعاب — إشعارُ قبضٍ وكشفُ حسابٍ لفترة.
+    "fee_receipt": "fee_receipt",
+    "fee_statement": "fee_statement",
 }
 
 
@@ -547,3 +550,43 @@ def make_payment_notice_obligation(env, office_tenant):
 @pytest.fixture
 def payment_notice(make_payment_notice_obligation):
     return make_payment_notice_obligation()
+
+
+# ── مستندا الأتعاب (#283/ب) ─────────────────────────────────────────────────
+@pytest.fixture
+def fee_receipt(env, office_tenant):
+    """دفعةُ أتعابٍ واحدة — عيّنةُ `fee_receipt` ومادّةُ سياقه العامّ.
+
+    تُنشأ بالنموذج مباشرةً لا بـ`payments.create_payment`: تلك تُرحّل قيداً
+    وتحتاج حساباتٍ وفترةً مالية، وعيّنةُ المستند لا تختبر المحاسبة — تختبر
+    الورقة. والرقمُ مكتوبٌ صريحاً كما يكتبه العدّاد المقفول.
+    """
+    from accounting_office.models import FeePayment, OfficeClient, TaxCard
+
+    client = OfficeClient.objects.create(
+        tenant=env["tenant"], name="زبون الإشعار المالي", responsible=env["owner"],
+    )
+    TaxCard.objects.create(client=client)
+    return FeePayment.objects.create(
+        tenant=env["tenant"],
+        client=client,
+        method="cash",
+        amount=Decimal("500.00"),
+        paid_at=datetime.date(2026, 3, 10),
+        receipt_number="2026-00001",
+        note="دفعةُ آذار",
+    )
+
+
+@pytest.fixture
+def fee_statement(env, office_tenant, fee_receipt):
+    """كشفُ حسابٍ لفترةٍ صريحة — عيّنةُ `fee_statement` ومادّةُ ورقته."""
+    from accounting_office.models import FeeStatement
+
+    return FeeStatement.objects.create(
+        tenant=env["tenant"],
+        client=fee_receipt.client,
+        period_from=datetime.date(2026, 1, 1),
+        period_to=datetime.date(2026, 12, 31),
+        created_by=env["owner"],
+    )

@@ -51,23 +51,29 @@ from django.db.models import (
 )
 from django.db.models.functions import Coalesce, Greatest
 from django.http import Http404
+from django.utils import timezone
 
-from accounting_office import fees, office_journal, services
+from accounting_office import fees, office_journal, services, settings_registry
 from accounting_office.models import (
     FEE_DRAFT_STATUS_APPROVED,
+    FEE_PAYMENT_METHOD_CHEQUE,
     FEE_PAYMENT_METHOD_CHOICES,
     FEE_PAYMENT_METHOD_LABELS,
+    OBLIGATION_BADGE_PAYMENT_RECEIVED,
     OBLIGATION_DIRECTION_REFUND,
     OBLIGATION_STATUS_NOT_REQUIRED,
+    REMINDER_COUNTED_KINDS,
     FeeDraft,
     FeePayment,
     FeePaymentAllocation,
     FeeReceiptSequence,
+    FeeStatement,
     FeeWriteOff,
     Obligation,
     assert_positive_fee_amount,
 )
 from core.access import MANAGER_ROLE, user_tenant_role
+from core.terminology import term as tenant_term
 
 AMOUNT_QUANTUM = Decimal("0.01")
 MONEY_EXPRESSION = DecimalField(max_digits=14, decimal_places=2)
@@ -89,6 +95,30 @@ INVOICE_STATE_LABELS: dict[str, str] = dict(INVOICE_STATE_CHOICES)
 #: حدودُ صفحة الكشف — الترقيمُ في الاستعلام لا في بايثون.
 LEDGER_PAGE_SIZE = 50
 LEDGER_MAX_PAGE_SIZE = 200
+
+#: ── المستندان (#283/ب) ──────────────────────────────────────────────────────
+#: عنوانُ الورقة ورمزُها في `docshare` **من هنا**: القالبُ والحمولةُ والنوعُ
+#: تقرأ الثلاثةَ من موضع واحد، فلا يفترق عنوانُ المستند عن عنوان نوعه.
+RECEIPT_TITLE = "إشعار قبض"
+STATEMENT_TITLE = "كشف حساب"
+RECEIPT_DOC_TYPE = "fee_receipt"
+STATEMENT_DOC_TYPE = "fee_statement"
+
+#: أنواعُ الحركة في كشف الحساب الثلاثة — وترتيبُها عند تساوي التاريخ: الفاتورةُ
+#: تُنشئ الدين قبل أن تُسدّده دفعةٌ في اليوم نفسه.
+MOVEMENT_KIND_INVOICE = "invoice"
+MOVEMENT_KIND_PAYMENT = "payment"
+MOVEMENT_KIND_WRITE_OFF = "write_off"
+MOVEMENT_KIND_LABELS: dict[str, str] = {
+    MOVEMENT_KIND_INVOICE: "فاتورة",
+    MOVEMENT_KIND_PAYMENT: "دفعة",
+    MOVEMENT_KIND_WRITE_OFF: "شطب",
+}
+MOVEMENT_KIND_ORDER: dict[str, int] = {
+    MOVEMENT_KIND_INVOICE: 0,
+    MOVEMENT_KIND_PAYMENT: 1,
+    MOVEMENT_KIND_WRITE_OFF: 2,
+}
 
 
 # ── القناع ──────────────────────────────────────────────────────────────────
@@ -1019,3 +1049,460 @@ def ledger_payload(tenant, *, user, params) -> dict:
             )[client.pk]
         ),
     }
+
+
+# ── إشعارُ القبض (#283/ب) ────────────────────────────────────────────────────
+def _text(value) -> str:
+    """مبلغٌ كنصٍّ بخانتين — لا `Decimal` خاماً في حمولةٍ تصل الودجات.
+
+    نفسُ حجّة `appointments.payment_notice_item`: قاموسٌ خامٌّ يمرّ مع DRF مائعاً
+    (`float`)، وهذا مبلغُ زبونٍ على ورقةٍ يوقّعها.
+    """
+    return f"{_money(value):.2f}"
+
+
+def _cheque_of(tenant, payment):
+    """ورقةُ الشيك في الدفاتر — `None` لغير الشيك، وللدفعة التي رُحّلت بلا شيك.
+
+    **`FeePayment` لا يحمل حقولَ شيك** (طريقةٌ ومبلغٌ وتاريخٌ وملاحظة فقط)،
+    وورقةُ الشيك تُنشَأ عند ترحيل الدفعة (`office_journal.post_payment_journal`
+    ← `accounting.api.ensure_incoming_cheque`) برقم الإشعار نفسِه مفتاحاً
+    (الشركة، الرقم). فالشيكُ يُقرأ من دفاتره لا من حقلٍ يُضاف إلى نموذج الدفعة —
+    ودفعةٌ في مكتبٍ أطفأ الترحيل لا شيكَ لها فلا سطرَ لها على الورقة.
+
+    **والاستيرادُ كسولٌ في الدالّة**: `accounting` يجرّ خدماتِه، وهذه الوحدةُ
+    تُستورد في إقلاع التطبيقات.
+    """
+    if payment.method != FEE_PAYMENT_METHOD_CHEQUE:
+        return None
+    from accounting.models import Cheque
+
+    cheque = (
+        Cheque.objects
+        .filter(
+            tenant=tenant,
+            cheque_number=payment.receipt_number,
+            direction="Incoming",
+        )
+        .order_by("id")
+        .first()
+    )
+    if cheque is None:
+        return None
+    return {
+        "number": cheque.cheque_number,
+        "bank_name": cheque.bank_name or "",
+        "due_date": None if cheque.due_date is None else cheque.due_date.isoformat(),
+    }
+
+
+def receipt_payload(tenant, payment, *, masked: bool) -> dict:
+    """ورقةُ إشعار القبض: **رقمُ الإشعار المخزَّن يُقرأ ولا يُولَّد**.
+
+    الرقمُ يأتي من `FeePayment.receipt_number` وحده — حقلٌ كُتب مرّةً عند
+    `create_payment` من العدّاد المقفول (`next_receipt_number`) ولا يُلمَس بعدها.
+    فطباعةُ الإشعار مرّتين لا تُكلّف العدّادَ شيئاً، ولا يوجد في هذه الدالّة —
+    ولا في القالب — أيُّ نداءٍ يستهلك رقماً. (الاختبارُ يفحص `FeeReceiptSequence`
+    قبل الطباعة وبعدها.)
+
+    و«اللي عليه» يُقرأ من `client_due` **الدالّة الواحدة** لا من حسابٍ ثانٍ هنا:
+    متبقّي كلّ فاتورةٍ بعد تخصيصاتها وشطوبها ناقصَ رصيده الدائن.
+
+    **والتخصيصاتُ تسمَّر بفترتها** (`fees.draft_period_label`) لا بمعرّف المسودّة:
+    الورقةُ تخرج للزبون، و`#412` في ورقةٍ لا يقول له شيئاً.
+    """
+    due = client_due(tenant, payment.client)
+    allocations = [
+        {
+            "draft": allocation.draft_id,
+            "period_label": fees.draft_period_label(allocation.draft),
+            "amount": None if masked else _text(allocation.amount),
+        }
+        for allocation in payment.allocations.select_related("draft").order_by("id")
+    ]
+    return {
+        "title": RECEIPT_TITLE,
+        "number": payment.receipt_number,
+        "date": payment.paid_at.isoformat(),
+        "client": _client_payload(payment.client),
+        "amount": None if masked else _text(payment.amount),
+        "method": payment.method,
+        "method_label": FEE_PAYMENT_METHOD_LABELS.get(payment.method, ""),
+        "cheque": _cheque_of(tenant, payment),
+        "note": payment.note,
+        "allocations": allocations,
+        "due": None if masked else _text(due.due),
+        "credit": None if masked else _text(due.credit),
+        "office": {"name": tenant.CompanyName},
+    }
+
+
+# ── كشفُ الحساب (#283/ب) ────────────────────────────────────────────────────
+def _month_start(year: int, month: int) -> date:
+    return date(year, month, 1)
+
+
+def _statement_movements(tenant, client, *, masked: bool) -> list[dict]:
+    """حركاتُ الزبون الثلاث **مرتَّبةً زمنياً** مع صفّها الجاهز لكل مجموعة.
+
+    المصدرُ هو مصدرُ `fees/ledger/` نفسه: `with_invoice_totals` للفواتير،
+    و`invoice_row`/`payment_row`/`write_off_row` تبني الصفوف كما تبنيها نقطةُ
+    الكشف — **لا حسابَ ثانياً هنا**. الجديدُ ترتيبٌ واحدٌ (تاريخ، نوع، معرّف)
+    يجعل رصيداً جارياً ممكناً: ثلاثُ مجموعاتٍ مفصولةٌ لا رصيدَ بينها.
+
+    وتاريخُ الحركة: تاريخُ الدفع للدفعة، ويومُ الشطب للشطب، و**أوّلُ شهر الفاتورة**
+    للفاتورة (المسودّةُ شهرٌ لا يوم). والرتيبُ `year, month, id` كما في
+    `DRAFT_AGING_ORDER`، ففاتورةُ آذار تسبق دفعةَ العاشر من نيسان دائماً.
+
+    **والمبالغُ مُوقَّعة**: الفاتورةُ تزيد الدين (+) والدفعةُ والشطبُ ينقصانه (−)،
+    فمجموعُها هو التغييرُ الصافي في «اللي عليه» — وهذا ما يثبته الاختبار.
+    """
+    movements: list[dict] = []
+    drafts = (
+        with_invoice_totals(
+            FeeDraft.objects
+            .filter(
+                tenant=tenant,
+                client=client,
+                status=FEE_DRAFT_STATUS_APPROVED,
+            )
+            .select_related("client"),
+        )
+        .order_by(*DRAFT_AGING_ORDER)
+    )
+    for draft in drafts:
+        movement_day = _month_start(draft.year, draft.month)
+        movements.append({
+            "kind": MOVEMENT_KIND_INVOICE,
+            "kind_label": MOVEMENT_KIND_LABELS[MOVEMENT_KIND_INVOICE],
+            "id": draft.pk,
+            "date": movement_day,
+            # اسمُ المستند من معجم الشركة لا حرفياً (حارس `test_terminology_guard`):
+            # قالبُ مكتب المحاسبة يسمّيها «أتعاب»، وغيره باسمه العامّ.
+            "label": (
+                f"{tenant_term(tenant, 'doc.sales_invoice')} "
+                f"{fees.draft_period_label(draft)}"
+            ),
+            "signed": _money(draft.total),
+            "group": invoice_row(
+                draft, summary=_summary_from_row(draft), masked=masked,
+            ),
+        })
+    payments = list(
+        FeePayment.objects
+        .filter(tenant=tenant, client=client)
+        .select_related("client")
+        .prefetch_related("allocations__draft")
+        .order_by("paid_at", "id"),
+    )
+    # معرّفاتُ القيود في استعلامٍ واحد — `None` في `payment_row` تعني «بلا قيد»
+    # صراحةً، فتمريرُها فارغةً كان يُنكر قيداً قائماً (#284).
+    entries = office_journal.journal_entry_ids(tenant, payments)
+    for payment in payments:
+        movements.append({
+            "kind": MOVEMENT_KIND_PAYMENT,
+            "kind_label": MOVEMENT_KIND_LABELS[MOVEMENT_KIND_PAYMENT],
+            "id": payment.pk,
+            "date": payment.paid_at,
+            "label": (
+                f"دفعة {payment.receipt_number} — "
+                f"{FEE_PAYMENT_METHOD_LABELS.get(payment.method, '')}"
+            ),
+            "signed": -_money(payment.amount),
+            "group": payment_row(
+                payment, masked=masked, journal_entry=entries.get(payment.pk),
+            ),
+        })
+    for write_off in (
+        FeeWriteOff.objects
+        .filter(tenant=tenant, draft__client=client)
+        .select_related("draft", "created_by")
+        .order_by("created_at", "id")
+    ):
+        movements.append({
+            "kind": MOVEMENT_KIND_WRITE_OFF,
+            "kind_label": MOVEMENT_KIND_LABELS[MOVEMENT_KIND_WRITE_OFF],
+            "id": write_off.pk,
+            "date": timezone.localdate(write_off.created_at),
+            "label": f"شطب — {write_off.reason}",
+            "signed": -_money(write_off.amount),
+            "group": write_off_row(write_off, masked=masked),
+        })
+    movements.sort(
+        key=lambda row: (row["date"], MOVEMENT_KIND_ORDER[row["kind"]], row["id"]),
+    )
+    return movements
+
+
+def statement_payload(
+    tenant, client, *, period_from=None, period_to=None, masked: bool = False,
+) -> dict:
+    """كشفُ حساب الزبون لفترة: الحركاتُ والرصيدُ الجاري والرصيدُ الختامي.
+
+    **الرصيدُ الجاري = الافتتاحيُّ + مجموع الحركات المعروضة**، والافتتاحيُّ صافي
+    ما قبل `period_from`. فآخرُ صفٍّ يطابق `closing_balance` دائماً — كشفُ
+    `client_books` (`book_reports`) نفسه في معناه.
+
+    **و`due` هو «اللي عليه» الآن** من `client_due` — **الدالّة الوحيدة**، لا من
+    الصفوف. ولهذا يُرسَل حقلٌ ثالثٌ مع الرصيدين: كشفٌ لفترةٍ سابقة رقمُه الختاميُّ
+    رصيدُ نهايتها (لا رصيدَ اليوم)، والورقةُ تحتاج الاثنين صريحين. وحين تغطّي
+    الفترةُ كلَّ الحركات حتى اليوم يتساوى الثلاثة — والاختبارُ يثبت ذلك، فهو
+    برهانُ اتّساق الصيغتين لا صدفةُ تركيب أرقام.
+
+    **والمجموعاتُ الثلاثُ** (`groups`) صفوفُ كشف الحساب القائمة نفسها
+    (`invoice_row`/`payment_row`/`write_off_row`) مقصورةً على الفترة — يقرؤها
+    القالبُ كما يشاء، ويُجمع كلُّ مجموعٍ من صفوفه (`totals`).
+    """
+    movements = _statement_movements(tenant, client, masked=masked)
+    opening = Decimal("0.00")
+    if period_from is not None:
+        opening = sum(
+            (row["signed"] for row in movements if row["date"] < period_from),
+            Decimal("0.00"),
+        )
+    opening = _money(opening)
+
+    running = opening
+    rows: list[dict] = []
+    shown: list[dict] = []
+    for movement in movements:
+        if period_from is not None and movement["date"] < period_from:
+            continue
+        if period_to is not None and movement["date"] > period_to:
+            continue
+        running = _money(running + movement["signed"])
+        shown.append(movement)
+        rows.append({
+            "kind": movement["kind"],
+            "kind_label": movement["kind_label"],
+            "id": movement["id"],
+            "date": movement["date"].isoformat(),
+            "label": movement["label"],
+            "amount": None if masked else _text(movement["signed"]),
+            "balance": None if masked else _text(running),
+        })
+
+    totals = {kind: Decimal("0.00") for kind in MOVEMENT_KIND_LABELS}
+    for movement in shown:
+        totals[movement["kind"]] += abs(movement["signed"])
+    due = client_due(tenant, client)
+    groups = {
+        "invoices": [row["group"] for row in shown if row["kind"] == MOVEMENT_KIND_INVOICE],
+        "payments": [row["group"] for row in shown if row["kind"] == MOVEMENT_KIND_PAYMENT],
+        "write_offs": [row["group"] for row in shown if row["kind"] == MOVEMENT_KIND_WRITE_OFF],
+    }
+    return {
+        "title": STATEMENT_TITLE,
+        "client": _client_payload(client),
+        "from": None if period_from is None else period_from.isoformat(),
+        "to": None if period_to is None else period_to.isoformat(),
+        "opening_balance": None if masked else _text(opening),
+        "closing_balance": None if masked else _text(running),
+        "due": None if masked else _text(due.due),
+        "credit": None if masked else _text(due.credit),
+        "totals": {
+            "invoices": None if masked else _text(totals[MOVEMENT_KIND_INVOICE]),
+            "payments": None if masked else _text(totals[MOVEMENT_KIND_PAYMENT]),
+            "write_offs": None if masked else _text(totals[MOVEMENT_KIND_WRITE_OFF]),
+            "movements": None if masked else _text(running - opening),
+        },
+        "rows": rows,
+        "groups": groups,
+        "office": {"name": tenant.CompanyName},
+    }
+
+
+def create_fee_statement(tenant, client, *, period_from=None, period_to=None, actor=None):
+    """صفُّ الكشف الذي يُعنوِن المستندَ — الفترةُ وحدها تُجمَّد، والأرقامُ تُقرأ.
+
+    **الافتراضُ سنةُ اليوم حتى اليوم** حين لا تُمرَّر فترة: كشفٌ بلا طرفٍ آخر
+    يفتح على «كلّ التاريخ» ويتضخّم مع كل دفعة، وسنةٌ كاملةٌ هي ما يطلبه المكتب
+    عادةً. والفترةُ الصريحة تُحترم كما هي ولو كانت مفتوحةً من الماضي.
+    """
+    period_to = period_to or timezone.localdate()
+    period_from = period_from or date(period_to.year, 1, 1)
+    if period_from > period_to:
+        raise ValidationError({"from": "بدايةُ الفترة بعد نهايتها."})
+    return FeeStatement.objects.create(
+        tenant=tenant,
+        client=client,
+        period_from=period_from,
+        period_to=period_to,
+        created_by=actor if getattr(actor, "pk", None) else None,
+    )
+
+
+def _share_payload(tenant, doc_type, doc_id, *, user, days=None) -> dict:
+    """رابطٌ عامٌّ حيٌّ للمستند — بآلية `docshare` وحدها، بلا مسارٍ ثانٍ.
+
+    **الاستيرادُ كسولٌ**: `docshare.services` يستورد سجلَّ الأنواع، ونوعُ
+    الإشعار هناك يستورد هذه الوحدة — واستيرادٌ في الأعلى يدير دورةً حقيقيّة.
+    """
+    from docshare import services as docshare_services
+
+    share = docshare_services.create_share(
+        tenant,
+        doc_type,
+        doc_id,
+        days=days or docshare_services.DEFAULT_EXPIRY_DAYS,
+        user=user,
+    )
+    return {
+        "url": docshare_services.public_url(share),
+        "expires_at": share.expires_at.isoformat(),
+    }
+
+
+def share_payment_receipt(tenant, payment, *, user, days=None) -> dict:
+    """`{url, expires_at}` لإشعار قبض دفعةٍ — الرابطُ على الورقة لا على الدفعة."""
+    return _share_payload(tenant, RECEIPT_DOC_TYPE, payment.pk, user=user, days=days)
+
+
+def share_client_statement(tenant, statement, *, user, days=None) -> dict:
+    """`{url, expires_at}` لكشف حسابٍ أُنشئ صفُّه للتوّ."""
+    return _share_payload(tenant, STATEMENT_DOC_TYPE, statement.pk, user=user, days=days)
+
+
+def share_new_client_statement(
+    tenant, client, *, period_from=None, period_to=None, user, days=None,
+) -> dict:
+    """صفُّ الكشف ورابطُه **في معاملةٍ واحدة** — لا صفَّ مستندٍ بلا رابط.
+
+    والصفُّ يبقى بعد الرابط (المستندُ موجودٌ تاريخياً وإن أُبطل رابطه)، لكن
+    فشلَ إنشاء الرابط (شركةٌ أطفأت ترخيص الوحدة مثلاً) لا يترك كشفاً لم يُصدر.
+    """
+    with transaction.atomic():
+        statement = create_fee_statement(
+            tenant, client,
+            period_from=period_from,
+            period_to=period_to,
+            actor=user,
+        )
+        return share_client_statement(tenant, statement, user=user, days=days)
+
+
+# ── اقتراحُ إشعار القبض في «جاهز للإرسال» (#283/ب) ──────────────────────────
+#: نصُّ سطر التفصيل المرافق لبند الإشعار — **برقمه ومبلغه وباقيه**.
+#:
+#: وليس في `REMINDER_DEFAULT_TEXTS` لأنه لا يُكتب بقوالب المكتب: الرقمُ والمبلغُ
+#: والباقي أرقامُ الخادم، والقوالبُ السابقةُ تحمل رموزاً عامّةً لا رقمَ مستند.
+#: واللغتان منفصلتان كسائر نصوص الموديول (بحث #256 §5).
+FEE_RECEIPT_DETAIL_TEXTS: dict[str, str] = {
+    "ar": "رقم الإشعار: {numbers} — المبلغ: {amount} — الباقي عليك: {remaining}",
+    "he": "מספר קבלה: {numbers} — סכום: {amount} — יתרה לתשלום: {remaining}",
+}
+
+
+def fee_receipt_detail(*, receipts, remaining, language="ar") -> str:
+    """سطرُ البند: أرقامُ إشعارات اليوم ومجموعُ مبالغها وما بقي على الزبون.
+
+    **ومفتاحُ البند تاريخُه**: `period_start = period_end = paid_at`. فدفعتان
+    لزبونٍ في يومٍ واحد تُطوى في بندٍ واحد يذكر رقمَي الإشعار — ولا بندان
+    بمفتاحٍ واحد. وهذا هو معنى «لا مفتاحَ مشترك» في تذكرة #283/ب: مفتاحُ البند
+    في هذا النظام (زبون، نوع، طرفا الفترة) ولا يحمل معرّفَ دفعة، فبندان برقمٍ
+    ليومٍ واحد يُعلَّم أحدهما فيُعلَّم الآخر — وهو بعينه ما مُنع.
+    """
+    numbers = "، ".join(receipt for receipt, _amount in receipts)
+    total = sum((amount for _receipt, amount in receipts), Decimal("0.00"))
+    template = FEE_RECEIPT_DETAIL_TEXTS.get(
+        language, FEE_RECEIPT_DETAIL_TEXTS["ar"],
+    )
+    return template.format(
+        numbers=numbers,
+        amount=_text(total),
+        remaining=_text(remaining),
+    )
+
+
+def fee_receipt_reminder_candidates(
+    tenant, clients, *, day, settings_by_client, contacts, by_pair,
+    postponed_pairs, reminder_type=None,
+) -> list:
+    """دفعاتُ اليوم التي لم يُعلَّم إشعارُها — بندٌ واحدٌ لكل زبونٍ في اليوم.
+
+    **والحاجزُ سجلُّ التذكيرات نفسه** لا صفٌّ على الدفعة: بندٌ عُلِّم «انبعث»
+    أو «كلّمناه» أو نُحّي يُقرأ من `by_pair` (المفتاحُ: زبون، نوع، طرفا الفترة)
+    فيصير `count >= maximum` فتحجبه `ready_to_send_payload` بحواجزها نفسها.
+    و`maximum = 1`: إشعارُ القبض يُقترح مرّةً واحدة، لا إيقاعَ تذكيرٍ متكرّر —
+    «جاهز للإرسال» يذكّر بما يجب، والإيصالُ الذي حصل حصل.
+
+    **ولا يقترح دفعةً أُرسل إشعارُها بطباعةٍ أو رابط**: تلك طُرُقٌ أخرى للمستند
+    نفسه (`fees/payments/<pk>/print|share`)، والاقتراحُ عن **الإعلام** لا عن
+    الطباعة. فمن طبعه ولم يرسله يبقى مقترحاً — وهو الصواب.
+    """
+    if reminder_type is not None and reminder_type != settings_registry.REMINDER_FEE_RECEIPT:
+        return []
+    client_ids = [client.pk for client in clients]
+    if not client_ids:
+        return []
+    rows = list(
+        FeePayment.objects
+        .filter(tenant=tenant, client_id__in=client_ids, paid_at=day)
+        .values("id", "client_id", "receipt_number", "amount")
+        .order_by("id"),
+    )
+    if not rows:
+        return []
+    by_client: dict[int, list[dict]] = {}
+    for row in rows:
+        by_client.setdefault(row["client_id"], []).append(row)
+    remaining_map = client_due_map(
+        tenant, [client for client in clients if client.pk in by_client],
+    )
+    candidates = []
+    for client in clients:
+        receipts = by_client.get(client.pk)
+        if not receipts:
+            continue
+        resolved = settings_by_client.get(client.pk, {})
+        enabled = resolved.get(services.REMINDER_TYPES_ENABLED_KEY) or []
+        if settings_registry.REMINDER_FEE_RECEIPT not in enabled:
+            continue
+        contact = contacts.get(
+            (client.pk, settings_registry.REMINDER_FEE_RECEIPT),
+        )
+        pair = (
+            client.pk, settings_registry.REMINDER_FEE_RECEIPT, day, day,
+        )
+        count = sum(
+            1 for row in by_pair.get(pair, []) if row["kind"] in REMINDER_COUNTED_KINDS
+        )
+        due = remaining_map.get(client.pk)
+        remaining = Decimal("0.00") if due is None else due.due
+        receipts_by_number = [
+            (row["receipt_number"], _money(row["amount"])) for row in receipts
+        ]
+        candidates.append(services.ReminderCandidate(
+            client=client,
+            reminder_type=settings_registry.REMINDER_FEE_RECEIPT,
+            period_start=day,
+            period_end=day,
+            missing=(),
+            missing_codes=(),
+            count=count,
+            maximum=1,
+            interval_days=1,
+            next_due=day,
+            contact=contact,
+            tax_system=resolved.get(services.TAX_SYSTEM_KEY),
+            due=day >= day,
+            exhausted=count >= 1,
+            postponed=(client.pk, settings_registry.REMINDER_FEE_RECEIPT) in postponed_pairs,
+            badge=OBLIGATION_BADGE_PAYMENT_RECEIVED,
+            render_due=day,
+            amount=sum((amount for _number, amount in receipts_by_number), Decimal("0.00")),
+            detail=fee_receipt_detail(
+                receipts=receipts_by_number,
+                remaining=remaining,
+                language=getattr(contact, "language", "") or "ar",
+            ),
+            receipt={
+                "payment_ids": [row["id"] for row in receipts],
+                "numbers": [number for number, _amount in receipts_by_number],
+                "amount": _text(
+                    sum((amount for _n, amount in receipts_by_number), Decimal("0.00")),
+                ),
+                "remaining": _text(remaining),
+            },
+        ))
+    return candidates

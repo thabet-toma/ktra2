@@ -261,6 +261,10 @@ def test_licensed_types_declare_their_module():
         # رابطاً يُصيَّر بعد إطفاء الترخيص (وحارسُ الصلاحية يمنع الإنشاءَ بـ400
         # على أيّ حال، فلا يُقاس عليه).
         "payment_notice": "accounting_office",
+        # #283/ب: إشعارُ القبض وكشفُ الحساب كذلك — شركةٌ أُطفئ ترخيصُ مكتبها لا
+        # تُصيَّر لها ورقةٌ تحمل دفعاتِ زبائنها وأرصدتَهم (410 للرابط الحيّ).
+        "fee_receipt": "accounting_office",
+        "fee_statement": "accounting_office",
     }
     for doc_type, module_key in licensed.items():
         assert DOC_TYPES[doc_type].get("module") == module_key, doc_type

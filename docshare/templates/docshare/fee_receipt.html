@@ -1,0 +1,134 @@
+{% extends "docshare/base.html" %}{% load docshare_fmt %}
+
+{% comment %}
+ورقةُ «إشعار القبض» (#283/ب) — صفحةٌ خادمية بلا JavaScript كسائر صفحات `docshare`.
+
+**والرقمُ يُقرأ ولا يُولَّد هنا**: `receipt.number` هو `FeePayment.receipt_number`
+الذي كُتب مرّةً عند الدفع من العدّاد المقفول (`FeeReceiptSequence`). ولا شيء في
+هذا القالب — ولا في مُصيِّره — يستهلك رقماً جديداً، فطباعةُ الورقة مرّاتٍ لا
+تُحرّك العدّاد.
+
+**و«الباقي» من الدالّة الواحدة** (`accounting_office.payments.client_due`):
+متبقّي الفواتير بعد التخصيصات والشطوب ناقصَ الرصيد الدائن. والقالبُ لا يحسب
+شيئاً — كلُّ رقمٍ يصل جاهزاً.
+{% endcomment %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_style %}
+  .fr-head{border-bottom:2px solid var(--ink); padding-bottom:16px; margin-bottom:18px}
+  .fr-org{font-size:18px; font-weight:800; margin:0 0 2px}
+  .fr-org-line{font-size:12px; color:var(--muted); margin:1px 0}
+  .fr-title{font-size:21px; font-weight:800; margin:16px 0 4px}
+  .fr-sub{font-size:12.5px; color:var(--muted); margin:0}
+  .fr-party{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:18px}
+  .fr-card{flex:1 1 240px; border:1px solid var(--line); border-radius:10px;
+           padding:12px 15px}
+  .fr-card h3{margin:0 0 6px; font-size:12px; color:var(--muted); font-weight:700}
+  .fr-row{display:flex; justify-content:space-between; gap:12px; font-size:13px;
+          padding:3px 0}
+  .fr-row span:first-child{color:var(--muted)}
+  .fr-lines{width:100%; border-collapse:collapse; margin:6px 0 0; font-size:14px}
+  .fr-lines th,.fr-lines td{border:1px solid var(--line); padding:10px 12px;
+                            text-align:right}
+  .fr-lines thead th{background:#f8fafc; font-size:12px; color:var(--muted);
+                     font-weight:700}
+  .fr-lines td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+  .fr-total{margin:16px 0 0; border-top:2px solid var(--ink); padding-top:12px;
+            font-size:18px; font-weight:800; display:flex; justify-content:space-between}
+  .fr-due{margin:10px 0 0; font-size:13.5px; display:flex; justify-content:space-between;
+          color:var(--brand)}
+  .fr-empty{border:1px solid var(--line); border-radius:10px; padding:14px 16px;
+            color:var(--muted); font-size:13px}
+  .fr-foot{margin-top:24px; padding-top:12px; border-top:1px solid var(--line);
+           font-size:11.5px; color:var(--muted); text-align:center}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+<div class="sheet">
+  <div class="fr-head">
+    <p class="fr-org">{{ company.company_name_primary }}</p>
+    {% if company.phone %}<p class="fr-org-line">هاتف: {{ company.phone }}</p>{% endif %}
+    {% if company.address %}<p class="fr-org-line">{{ company.address }}</p>{% endif %}
+  </div>
+
+  <p class="fr-title">{{ title }}</p>
+  <p class="fr-sub">إيصالُ استلامٍ لمبلغٍ دخل المكتب — ليس فاتورةَ ضريبة.</p>
+
+  <div class="fr-party">
+    <div class="fr-card">
+      <h3>الزبون</h3>
+      <div class="fr-row"><span>الاسم</span><span><strong>{{ receipt.client.name }}</strong></span></div>
+    </div>
+    <div class="fr-card">
+      <h3>بيانات الإشعار</h3>
+      <div class="fr-row"><span>رقم الإشعار</span><span><strong>{{ receipt.number }}</strong></span></div>
+      <div class="fr-row"><span>التاريخ</span><span>{{ receipt.date|gdate }}</span></div>
+      <div class="fr-row"><span>طريقة الدفع</span><span>{{ receipt.method_label }}</span></div>
+      {% if receipt.cheque %}
+      <div class="fr-row">
+        <span>الشيك</span>
+        <span>
+          {{ receipt.cheque.number }}
+          {% if receipt.cheque.bank_name %} — {{ receipt.cheque.bank_name }}{% endif %}
+          {% if receipt.cheque.due_date %} — يستحقّ {{ receipt.cheque.due_date|gdate }}{% endif %}
+        </span>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <table class="fr-lines">
+    <thead>
+      <tr>
+        <th>البيان</th>
+        <th>الفترة</th>
+        <th>المبلغ</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in receipt.allocations %}
+      <tr>
+        <td>تخصيصُ الدفعة على فاتورةٍ قائمة</td>
+        <td>{{ line.period_label }}</td>
+        <td class="num">{{ line.amount|money }}</td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="3" class="num">دفعةٌ غيرُ مخصَّصةٍ على فاتورة — رصيدٌ دائنٌ للزبون.</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="fr-total">
+    <span>المبلغ المقبوض</span>
+    <span>{{ receipt.amount|money }}</span>
+  </div>
+  <div class="fr-due">
+    <span>الباقي على الزبون بعد هذه الدفعة</span>
+    <span>{{ receipt.due|money }}</span>
+  </div>
+  {% if receipt.credit and receipt.credit != "0.00" %}
+  <div class="fr-due">
+    <span>رصيدٌ دائنٌ غيرُ مخصَّص</span>
+    <span>{{ receipt.credit|money }}</span>
+  </div>
+  {% endif %}
+
+  {% if receipt.note %}
+  <p class="fr-empty">ملاحظة: {{ receipt.note }}</p>
+  {% endif %}
+
+  <div class="fr-foot">
+    {{ company.company_name_primary }}
+    <br>{{ title }} {{ receipt.number }} — {{ receipt.date|gdate }}
+  </div>
+</div>
+{% endblock %}

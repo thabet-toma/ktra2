@@ -39,7 +39,13 @@ export type ShareDocType =
   | "purchase_rfq"
   // #285: ورقة «إشعار الدفع» التي يُنشئها مكتب المحاسبة على بند «موعد رسمي قريب»
   // — جمهورها الزبون، وصلاحيتها `office.clients.write`.
-  | "payment_notice";
+  | "payment_notice"
+  // #283/ب: مستندا الأتعاب — إشعارُ قبضِ دفعةٍ وكشفُ حسابٍ لفترة. يُنشآن من
+  // مكتب المحاسبة وحده (`fees/payments/<id>/share/` و`fees/ledger/share/`)،
+  // والبابُ العامّ يردّهما 400 عمداً — و`utils/shareDocTypes.test.ts` يفرض
+  // تطابقَ هذه القائمة مع سجلّ الخادم حرفاً بحرف.
+  | "fee_receipt"
+  | "fee_statement";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {

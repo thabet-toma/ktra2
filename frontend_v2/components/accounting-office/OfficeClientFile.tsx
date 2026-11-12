@@ -87,6 +87,10 @@ import { OfficeClientAppointments } from './OfficeClientAppointments';
 import { OfficeClientBook } from './OfficeClientBook';
 import { OfficeClientDocuments } from './OfficeClientDocuments';
 import { OfficeClientEvents } from './OfficeClientEvents';
+import {
+  OfficeClientFees,
+  OfficeClientStatementButton,
+} from './OfficeClientFees';
 import { OfficeObligationRow } from './OfficeObligationRow';
 import { SettingControl } from './SettingControl';
 import {
@@ -114,6 +118,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'notes', label: 'ملاحظات' },
   // #281: المواعيدُ — قبل «الدفتر»، كترتيبها في `CLIENT_TAB_KEYS`.
   { key: 'appointments', label: 'المواعيد' },
+  // #283/ب: الأتعابُ — الدفعاتُ بإشعارِ قبضٍ لكلٍّ (والكشفُ من رأس الملفّ).
+  { key: 'fees', label: 'الأتعاب' },
   // #286/ب: حركاتُ دفتر الزبون وإدخالُها — آخراً كموضعه في `CLIENT_TAB_KEYS`.
   { key: 'book', label: 'الدفتر' },
 ];
@@ -1320,22 +1326,25 @@ export const OfficeClientFile: React.FC<{
               </label>
             ) : null}
           </div>
-          {canWrite ? (
-            <button
-              type="button"
-              onClick={toggleStatus}
-              className={
-                client.status === 'active'
-                  ? 'rounded-lg border border-rose-200 bg-white px-3 py-2 text-[12px] font-medium text-rose-700 dark:border-rose-900 dark:bg-slate-900 dark:text-rose-300'
-                  : officePrimaryButtonClass
-              }
-            >
-              {client.status === 'active' ? 'أنهِ الزبون' : 'أعِد نشاطاً'}
-            </button>
-          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            {/* #283/ب: كشفُ الحساب من رأس الملفّ — منتقيُ فترةٍ ثم طباعةٌ أو مشاركة. */}
+            <OfficeClientStatementButton clientId={clientId} canWrite={canWrite} />
+            {canWrite ? (
+              <button
+                type="button"
+                onClick={toggleStatus}
+                className={
+                  client.status === 'active'
+                    ? 'rounded-lg border border-rose-200 bg-white px-3 py-2 text-[12px] font-medium text-rose-700 dark:border-rose-900 dark:bg-slate-900 dark:text-rose-300'
+                    : officePrimaryButtonClass
+                }
+              >
+                {client.status === 'active' ? 'أنهِ الزبون' : 'أعِد نشاطاً'}
+              </button>
+            ) : null}
+          </div>
         </div>
       </header>
-
       <div className="border-b border-slate-200 dark:border-slate-700">
         <div className="-mb-px flex gap-1 overflow-x-auto">
           {TABS.map((entry) => (
@@ -2327,6 +2336,11 @@ export const OfficeClientFile: React.FC<{
           canWrite={canWrite}
           taxSystem={client.tax_system}
         />
+      ) : null}
+
+      {tab === 'fees' ? (
+        // #283/ب: دفعاتُ الزبون بإشعارِ قبضٍ لكلٍّ — والطباعةُ والرابطُ من الخادم.
+        <OfficeClientFees clientId={clientId} canWrite={canWrite} />
       ) : null}
 
       {tab === 'book' ? (
