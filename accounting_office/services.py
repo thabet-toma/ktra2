@@ -6099,8 +6099,26 @@ def document_progress(tenant, obligations) -> dict[int, dict]:
 
 
 # ── الحمولات: الشبكة والقائمة السنوية والقالب ──────────────────────────────
-def _document_cell_payload(row, *, month) -> dict:
-    """خانةُ شهرٍ في الشبكة — `row_id=None` تعني «لا صفَّ لهذا البند في الشهر»."""
+def _document_values_payload(row, *, masked) -> dict:
+    """حقولُ مبلغ الورقة الأربعة (#286/ج) — **وقرارُ القناع جاهزٌ يُمرَّر**.
+
+    الحقولُ وقناعُها في `client_books` وحدها (`DOCUMENT_VALUE_FIELDS` و
+    `document_values_payload`): المبلغان يمرّان بـ`mask_amounts`، والنسبةُ
+    والطرفُ يبقيان لأن إخفاءهما يترك الحارسَ بلا وجه. استيرادٌ كسول:
+    `client_books` يستورد هذه الوحدة، فالاستيرادُ أعلى الملفّ دورة.
+    """
+    from accounting_office import client_books
+
+    return client_books.document_values_payload(row, masked=masked)
+
+
+def _document_cell_payload(row, *, month, masked) -> dict:
+    """خانةُ شهرٍ في الشبكة — `row_id=None` تعني «لا صفَّ لهذا البند في الشهر».
+
+    **وحقولُ المبلغ الأربعة تخرج هنا أيضاً**: شبكةُ الأشهر هي مكانُ اختيار
+    الورقة وإدخال مبلغها، فبلا هذه الحقول لا تقرأ الشاشةُ مبلغَ ورقةٍ أدخلته
+    أمس (#286/ج). والخانةُ الفارغةُ تحملها `null` كي لا يختلف شكلُ الخانة.
+    """
     if row is None:
         return {
             "month": month.isoformat(),
@@ -6112,8 +6130,12 @@ def _document_cell_payload(row, *, month) -> dict:
             "channel": "",
             "channel_label": "",
             "files_count": 0,
+            "amount": None,
+            "tax_amount": None,
+            "vat_rate": None,
+            "side_party": "",
         }
-    return {
+    payload = {
         "month": month.isoformat(),
         "row_id": row.pk,
         "status": row.status,
@@ -6126,10 +6148,29 @@ def _document_cell_payload(row, *, month) -> dict:
         "channel_label": DOCUMENT_CHANNEL_LABELS.get(row.channel, ""),
         "files_count": len(list(row.files.all())),
     }
+    payload.update(_document_values_payload(row, masked=masked))
+    return payload
 
 
-def document_row_payload(row, *, files=None) -> dict:
-    """سطرُ ورقةٍ كاملاً — يُرجع من فعل الحالة، ومن القائمة السنوية."""
+def document_row_payload(row, *, files=None, user=None, masked=None) -> dict:
+    """سطرُ ورقةٍ كاملاً — يُرجع من فعل الحالة، ومن القائمة السنوية.
+
+    **وحقولُ مبلغ الورقة الأربعة (#286/ج) تخرج من هنا**: بلا `amount` في السطر
+    لا تقرأ قائمةُ الأوراق مبلغَ الورقة، فلا تُدخل حركةً من ورقها.
+
+    **والقناعُ قرارٌ يُحسب مرّةً واحدة**: `user` يُترجَم إلى قرارٍ بـ
+    `client_books.amounts_masked` (سؤالُ الصلاحية أربعةُ استعلاماتٍ إلى خمسة)،
+    فقائمةُ ألف صفٍّ تمرّره جاهزاً بـ`masked` بدل ألف سؤال. **وغيابُ الطالب
+    يُقنّع**: نداءٌ لا يقول مَن يقرأ لا يخرج له مبلغ — والخطأُ في هذا الاتجاه
+    إخفاءُ رقمٍ لا كشفُه.
+    """
+    if masked is None:
+        if user is None:
+            masked = True
+        else:
+            from accounting_office import client_books
+
+            masked = client_books.amounts_masked(row.tenant, user)
     payload = {
         "row_id": row.pk,
         "client_id": row.client_id,
@@ -6152,18 +6193,28 @@ def document_row_payload(row, *, files=None) -> dict:
     }
     if files is not None:
         payload["files"] = files
+    payload.update(_document_values_payload(row, masked=masked))
     return payload
 
 
-def client_documents_payload(client, *, year) -> dict:
+def client_documents_payload(client, *, year, user=None) -> dict:
     """شبكةُ الأشهر × البنود والقائمةُ السنوية — **كلُّ صفٍّ بعدد الأشهر نفسه**.
 
     `months` = الأشهرُ التي لها صفٌّ واحدٌ على الأقلّ لهذا الزبون في السنة
     (تصاعداً)، وكلُّ بندٍ خانةٌ لكل شهرٍ فيها — `row_id=None` حيث لا صفّ
     (معيار القبول ٥). والبنودُ مرتّبةٌ بترتيب الكتالوج ثم الاسم، والقائمةُ السنوية
     صفوفُ السنة نفسها بدوريتها السنوية وبملفاتها.
+
+    **و`user` لقناع مبالغ الأوراق (#286/ج)**: قرارُ القناع يُحسب هنا مرّةً واحدة
+    ويُمرَّر للخانات والسطور، لأن الشبكةَ عشراتُ الصفوف وسؤالُ الصلاحية أربعةُ
+    استعلاماتٍ إلى خمسة. وغيابُه يُقنّع (`document_row_payload`) — النداءُ الذي
+    لا يعرف قارئَه لا يخرج له مبلغُ ورقة.
     """
     tenant = client.tenant
+    # استيرادٌ كسول: `client_books` يستورد هذه الوحدة (كما في `_document_values_payload`).
+    from accounting_office import client_books
+
+    masked = True if user is None else client_books.amounts_masked(tenant, user)
     rows = list(
         DocumentChecklistItem.objects
         .filter(
@@ -6210,7 +6261,9 @@ def client_documents_payload(client, *, year) -> dict:
                 "item_code": code,
                 "name": names[code],
                 "cells": [
-                    _document_cell_payload(by_key.get((code, month)), month=month)
+                    _document_cell_payload(
+                        by_key.get((code, month)), month=month, masked=masked,
+                    )
                     for month in months
                 ],
             }
@@ -6220,6 +6273,7 @@ def client_documents_payload(client, *, year) -> dict:
             document_row_payload(
                 row,
                 files=[document_file_payload(file) for file in row.files.all()],
+                masked=masked,
             )
             for row in annual
         ],

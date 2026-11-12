@@ -3,6 +3,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   changeClientBookKind,
   createBookEntry,
+  createBookEntryFromDocuments,
   createClientBook,
   getClientBook,
   getClientBookChoices,
@@ -22,9 +23,11 @@ import {
   bookedDocumentIds,
   entryDateForMonth,
   formatOfficeAmount,
+  generatableEntryKinds,
   isLiveBookEntry,
   multipleDocumentsAllowed,
   nextBookKind,
+  paperGenerationBlocker,
   pendingMonthDocuments,
   periodResultClass,
   type BookAccountRow,
@@ -151,6 +154,13 @@ export const OfficeClientBook: React.FC<{
   const [draftDocuments, setDraftDocuments] = useState<number[]>([]);
   const [formError, setFormError] = useState('');
 
+  // #286/ج: «ولّد البنود من الأوراق» — نوعُ الحركة ثم الخادمُ يبني البنود.
+  const [generateOpen, setGenerateOpen] = useState(false);
+  const [generateKind, setGenerateKind] = useState('');
+  const [generateError, setGenerateError] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [generated, setGenerated] = useState<BookEntryRow | null>(null);
+
   const [documents, setDocuments] = useState<ClientDocumentsPayload | null>(null);
   const [documentsYear, setDocumentsYear] = useState<number | null>(null);
   const [documentsError, setDocumentsError] = useState('');
@@ -256,6 +266,13 @@ export const OfficeClientBook: React.FC<{
 
   const doubleEntry = book ? bookKindOn(book, draftDate) === 'double' : false;
   const problem = bookDraftProblem(draftLines, { doubleEntry });
+  // الأنواعُ الخمسة من قائمة الخادم: اليدويُّ والافتتاحيُّ لا يُولَّدان من ورق.
+  const paperKinds = useMemo(
+    () => generatableEntryKinds(book?.entry_kind_choices ?? []),
+    [book],
+  );
+  // ورقةٌ بلا مبلغٍ يردّها الخادمُ 400 باسمها — فلا نُرسل ما نعلم أنه سيُردّ.
+  const generateBlocked = paperGenerationBlocker(pendingDocuments, draftDocuments);
   const targetKind = book ? nextBookKind(book) : null;
   // تسميةُ النوع الهدف من `book_kinds` لا من أنواع الحركة — الخطأُ القديم كان
   // يبحث عن `'double'` بين أنواع الحركة فلا يجده فيظهر «غيّر نوع الدفتر» دائماً.
@@ -276,6 +293,9 @@ export const OfficeClientBook: React.FC<{
     setDraftDocuments([]);
     setFormError('');
     setDateEdited(false);
+    setGenerateOpen(false);
+    setGenerateKind('');
+    setGenerateError('');
   }, []);
 
   /** «اختر الكل» في وضع «إدخال الشهر» وحده — ورقةٌ لكل حركةٍ في وضع «ورقة ورقة». */
@@ -338,6 +358,43 @@ export const OfficeClientBook: React.FC<{
   }, [
     book, clientId, draftDate, draftDocuments, draftKind, draftLines, draftMemo,
     problem, reload, resetDraft, toast,
+  ]);
+
+  /**
+   * «ولّد البنود من الأوراق» (#286/ج) — **الخادمُ يولّد، والواجهةُ تجمع وترتّب**.
+   *
+   * الحسابُ يتبع نوعَ الورقة لا ذوقَ من يُدخل (`ENTRY_KIND_ACCOUNTS`)، والضريبةُ
+   * على `2200` بالطرف المقابل، والتاريخُ افتراضاً آخرُ شهر الأوراق — فلا بندَ ولا
+   * حسابَ يُرسَل من هنا، ورسالةُ الخادمِ (ورقةٌ بلا مبلغ، أو ورقٌ من شهرين) تُعرض
+   * بنصّها بدل تخمينها.
+   */
+  const generate = useCallback(async () => {
+    if (!book || !generateKind || !draftDocuments.length || generateBlocked) return;
+    setGenerating(true);
+    setGenerateError('');
+    try {
+      const entry = await createBookEntryFromDocuments(clientId, {
+        kind: generateKind,
+        documents: draftDocuments,
+        // التاريخُ الذي في الحقل: افتراضُه `entryDateForMonth`، ويُرسَل كما هو
+        // لأن الخادمَ يقبل تاريخاً صريحاً لورقةٍ متأخّرة.
+        ...(draftDate ? { entry_date: draftDate } : {}),
+        ...(draftMemo ? { memo: draftMemo } : {}),
+      });
+      setGenerated(entry);
+      toast(`انكتبت الحركة رقم ${entry.number} من ${entry.documents.length} ورقة`, 'success');
+      resetDraft();
+      // الحركاتُ وقائمةُ «للإدخال» تعود من الخادم: الورقةُ تخرج من القائمة لأن
+      // شرطَها صار كاذباً لا لأن أحداً كتب «انأدخلت» (د9).
+      reload();
+    } catch (failure) {
+      setGenerateError(humanizeThrown(failure, 'تعذّر توليد البنود من الأوراق.'));
+    } finally {
+      setGenerating(false);
+    }
+  }, [
+    book, clientId, draftDate, draftDocuments, draftMemo, generateBlocked,
+    generateKind, reload, resetDraft, toast,
   ]);
 
   const reverse = useCallback(async (entry: BookEntryRow) => {
@@ -724,6 +781,21 @@ export const OfficeClientBook: React.FC<{
                       {allPendingSelected ? 'أزل الكل' : 'اختر الكل'}
                     </button>
                   ) : null}
+                  {/* #286/ج: يظهر حين تُختار أوراق — التوليدُ يحتاج ورقاً أوّلاً. */}
+                  {canEnter && draftDocuments.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setGenerateOpen((open) => !open);
+                        setGenerateError('');
+                      }}
+                      className="text-[11px] font-semibold text-teal-700 hover:underline dark:text-teal-400"
+                    >
+                      {generateOpen
+                        ? 'إلغاء التوليد'
+                        : `ولّد البنود من الأوراق (${draftDocuments.length})`}
+                    </button>
+                  ) : null}
                   <input
                     type="month"
                     value={draftMonth}
@@ -792,6 +864,58 @@ export const OfficeClientBook: React.FC<{
                 </ul>
               )}
             </div>
+
+            {/* #286/ج: لوحُ التوليد — نوعُ الحركة ثم يبني الخادمُ بنداً لكل ورقة. */}
+            {generateOpen && draftDocuments.length > 0 ? (
+              <div className="mt-2 rounded-lg border border-teal-200 bg-teal-50/60 p-2 dark:border-teal-900 dark:bg-teal-950/30">
+                <p className="text-[10.5px] font-medium text-slate-600 dark:text-slate-300">
+                  يبني الخادمُ بنداً لكل ورقةٍ على حسابات نوعها: المبلغُ والضريبةُ من
+                  الورقة، والطرفُ على سطر ذمّته — فلا حسابَ يُختار هنا.
+                </p>
+                <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                  <select
+                    value={generateKind}
+                    onChange={(event) => setGenerateKind(event.target.value)}
+                    className={officeInputClass}
+                    aria-label="نوع الحركة المولَّدة"
+                  >
+                    <option value="">— اختر النوع —</option>
+                    {paperKinds.map((choice) => (
+                      <option key={choice.value} value={choice.value}>{choice.label}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => void generate()}
+                    disabled={generating || !generateKind || Boolean(generateBlocked)}
+                    className={`${officePrimaryButtonClass} disabled:opacity-50`}
+                  >
+                    {generating ? '…' : 'ولّد الحركة'}
+                  </button>
+                </div>
+                {generateBlocked ? (
+                  <p className="mt-1.5 text-[10.5px] font-medium text-amber-800 dark:text-amber-300">
+                    {generateBlocked}
+                  </p>
+                ) : null}
+                {generateError ? (
+                  <p
+                    role="alert"
+                    className="mt-1.5 text-[10.5px] font-medium text-rose-600 dark:text-rose-400"
+                  >
+                    {generateError}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {generated ? (
+              <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
+                انكتبت الحركةُ رقم {generated.number} (سنة {generated.year}):{' '}
+                {generated.documents.length} ورقة بمبلغ{' '}
+                {formatOfficeAmount(generated.total_debit)} — {generated.kind_label}.
+              </div>
+            ) : null}
 
             {problem !== '' ? (
               <p className="mt-2 text-[11px] font-medium text-amber-800 dark:text-amber-300">

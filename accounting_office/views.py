@@ -668,10 +668,13 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
 
         الصفوفُ تُولَّد في «حدّث المكتب» لا هنا: طلبُ الشبكة لا يكتب صفّاً، فسنةٌ
         لم يحن وقتُها تعود فارغةً بلا أن تخترع ورقةً لم تُطلب بعد.
+
+        **و`user` للقناع (#286/ج)**: الشبكةُ تحمل مبلغَ كل ورقةٍ وضريبتها، فالقرارُ
+        يُتّخذ في الـview الذي يعرف الطالب — لا في حمولةٍ لا تعرف مَن يقرؤها.
         """
         client = self.get_object()
         return Response(services.client_documents_payload(
-            client, year=self._document_year(request),
+            client, year=self._document_year(request), user=request.user,
         ))
 
     @action(detail=True, methods=["post"], url_path="document-choice")
@@ -1593,16 +1596,14 @@ class OfficeDocumentViewSet(OfficeModuleViewSet):
     def _document_payload(self, row):
         """سطرُ الورقة + حقولُ مبلغها — **والقناعُ على المبلغين**.
 
-        `services.document_row_payload` تبني سطرَ الحالة كما تقرؤه القوائمُ ولا
-        تعرف حقولَ #286/ج (تخرج من مسار الورقة هذا وحده)، فتُضاف بقناعها:
-        من لا يرى المبالغ يقرأ `null` ويقرأ الطرفَ والنسبة — الشكلُ لا يتغيّر.
+        `services.document_row_payload` صارت تُرجع الحقولَ الأربعة نفسَها
+        (#286/ج)، فالقرارُ يُمرَّر إليها جاهزاً — والشكلُ واحدٌ بين من يرى
+        المبالغ (`null` وحدها للمحجوب) ومن لا يراها.
         """
-        payload = services.document_row_payload(row)
-        payload.update(client_books.document_values_payload(
+        return services.document_row_payload(
             row,
             masked=client_books.amounts_masked(self.tenant, self.request.user),
-        ))
-        return payload
+        )
 
     @action(detail=True, methods=["get", "post"], url_path="files")
     def files(self, request, pk=None):

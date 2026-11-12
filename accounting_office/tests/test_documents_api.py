@@ -313,6 +313,164 @@ class GridApiTest(DocumentsApiTestCase):
         self.assertIn("files", payload["annual"][0])
 
 
+class PaperAmountsPayloadTest(DocumentsApiTestCase):
+    """حقولُ مبلغ الورقة في الحمولة — #286/ج: القائمةُ السنوية وشبكةُ الأشهر.
+
+    **الفرقُ الذي يثبته هذا الصنف:** المبلغان (`amount`/`tax_amount`) يخرجان
+    بقيمتهما لمن يملك `office.amounts.view` و`null` لمن لا يملكه، ويبقى للناظر
+    بلا مفتاحٍ النسبةُ والطرف («نسبةٌ واسمٌ لا مال»)، ولا مفتاحَ قائمٍ يختفي أو
+    يتغيّر شكلُه. بلا هذه الحقول لا تقرأ الواجهةُ مبلغَ الورقة أصلاً، فلا تدخل
+    حركةً من ورقها (#286/ج).
+    """
+
+    #: مفاتيحُ سطر الورقة قبل #286/ج — تبقى كلُّها كما هي.
+    ROW_KEYS = frozenset({
+        "row_id", "client_id", "item_code", "name", "service_codes", "cadence",
+        "period_start", "period_end", "period_label", "status", "status_label",
+        "received_on", "received_by_name", "channel", "channel_label",
+        "files_count",
+    })
+
+    #: مفاتيحُ خانة الشهر قبل #286/ج.
+    CELL_KEYS = frozenset({
+        "month", "row_id", "status", "status_label", "received_on",
+        "received_by_name", "channel", "channel_label", "files_count",
+    })
+
+    #: الحقولُ الأربعة — عقدُ `client_books.DOCUMENT_VALUE_FIELDS`.
+    VALUE_KEYS = frozenset({"amount", "tax_amount", "vat_rate", "side_party"})
+
+    def setUp(self):
+        super().setUp()
+        # الورقتان تُكتبان مباشرةً: كتابةُ القيم من الـAPI لها اختباراتُها في
+        # `test_book_entry_generation`، والمقصودُ هنا شكلُ ما يخرج للقارئ.
+        self.monthly = self.paper(
+            cadence="monthly", period_start=JAN_START, period_end=JAN_END,
+            code="il_bank_statements",
+        )
+        self.annual = self.paper(
+            cadence="annual",
+            period_start=datetime.date(2025, 1, 1),
+            period_end=datetime.date(2025, 12, 31),
+            code="il_audited_statements",
+        )
+
+    def paper(self, *, cadence, period_start, period_end, code):
+        return DocumentChecklistItem.objects.create(
+            tenant=self.tenant,
+            client=self.mine,
+            item_code=code,
+            name=f"ورقة {code}",
+            service_codes=["vat"],
+            cadence=cadence,
+            period_start=period_start,
+            period_end=period_end,
+            status=DOCUMENT_STATUS_RECEIVED,
+            channel="paper",
+            amount=Decimal("100.00"),
+            tax_amount=Decimal("17.00"),
+            vat_rate=Decimal("17.00"),
+            side_party="شركة الأمل",
+        )
+
+    def annual_row(self):
+        payload = self.documents(self.mine, year=2025).data
+        return next(row for row in payload["annual"] if row["row_id"] == self.annual.pk)
+
+    def month_cell(self):
+        payload = self.documents(self.mine, year=2026).data
+        return next(
+            cell
+            for item in payload["items"]
+            for cell in item["cells"]
+            if cell["row_id"] == self.monthly.pk
+        )
+
+    def test_the_annual_row_carries_the_paper_amounts_for_the_owner(self):
+        self.as_user(self.owner)
+
+        row = self.annual_row()
+
+        self.assertEqual(Decimal(row["amount"]), Decimal("100.00"))
+        self.assertEqual(Decimal(row["tax_amount"]), Decimal("17.00"))
+        self.assertEqual(Decimal(row["vat_rate"]), Decimal("17.00"))
+        self.assertEqual(row["side_party"], "شركة الأمل")
+
+    def test_the_month_cell_carries_the_paper_amounts_for_the_owner(self):
+        self.as_user(self.owner)
+
+        cell = self.month_cell()
+
+        self.assertEqual(Decimal(cell["amount"]), Decimal("100.00"))
+        self.assertEqual(Decimal(cell["tax_amount"]), Decimal("17.00"))
+        self.assertEqual(Decimal(cell["vat_rate"]), Decimal("17.00"))
+        self.assertEqual(cell["side_party"], "شركة الأمل")
+
+    def test_the_amounts_are_masked_for_a_member_without_the_amounts_key(self):
+        """المبلغان `null` والنسبةُ والطرفُ باقيان — عقدُ #272 في الورقة."""
+        self.as_user(self.accountant)
+
+        row = self.annual_row()
+
+        self.assertIsNone(row["amount"])
+        self.assertIsNone(row["tax_amount"])
+        self.assertEqual(Decimal(row["vat_rate"]), Decimal("17.00"))
+        self.assertEqual(row["side_party"], "شركة الأمل")
+
+    def test_the_cell_amounts_are_masked_for_a_member_without_the_amounts_key(self):
+        self.as_user(self.accountant)
+
+        cell = self.month_cell()
+
+        self.assertIsNone(cell["amount"])
+        self.assertIsNone(cell["tax_amount"])
+        self.assertEqual(Decimal(cell["vat_rate"]), Decimal("17.00"))
+        self.assertEqual(cell["side_party"], "شركة الأمل")
+
+    def test_the_row_and_cell_shapes_keep_their_existing_keys(self):
+        self.as_user(self.owner)
+
+        row = self.annual_row()
+        cell = self.month_cell()
+
+        self.assertLessEqual(self.ROW_KEYS, set(row))
+        self.assertLessEqual(self.CELL_KEYS, set(cell))
+        self.assertLessEqual(self.VALUE_KEYS, set(row))
+        self.assertLessEqual(self.VALUE_KEYS, set(cell))
+
+    def test_a_paper_without_an_amount_reads_none_not_zero(self):
+        """الفراغُ `None` لا `"0.00"`: ورقةٌ بلا مبلغٍ ليست ورقةً بمبلغ صفر."""
+        self.as_user(self.owner)
+        DocumentChecklistItem.objects.filter(pk=self.annual.pk).update(
+            amount=None, tax_amount=None, vat_rate=None, side_party="",
+        )
+
+        row = self.annual_row()
+
+        self.assertIsNone(row["amount"])
+        self.assertIsNone(row["tax_amount"])
+        self.assertIsNone(row["vat_rate"])
+        self.assertEqual(row["side_party"], "")
+
+    def test_the_payload_function_masks_by_the_reader_and_hides_without_one(self):
+        """النداءُ المباشر: الطالبُ يُترجَم إلى قرار، وغيابُه يُقنّع لا يكشف."""
+        for user, expected in (
+            (self.owner, Decimal("100.00")),
+            (self.accountant, None),
+            (None, None),
+        ):
+            with self.subTest(user=user):
+                row = services.document_row_payload(self.annual, user=user)
+                if expected is None:
+                    self.assertIsNone(row["amount"])
+                    self.assertIsNone(row["tax_amount"])
+                else:
+                    self.assertEqual(Decimal(row["amount"]), expected)
+                # النسبةُ والطرفُ لا يُقنَّعان — نسبةٌ واسمٌ لا مال.
+                self.assertEqual(Decimal(row["vat_rate"]), Decimal("17.00"))
+                self.assertEqual(row["side_party"], "شركة الأمل")
+
+
 class StatusApiTest(DocumentsApiTestCase):
     """تسجيلُ الوصول: مَن ومتى وكيف — والقناةُ إلزامية."""
 
