@@ -18,6 +18,7 @@ from inventory.services import (
     set_avg_cost_from_purchases,
 )
 from accounting.models import JournalHeader
+from core.pricing import last_purchase_prices_base_currency
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
 from partners.models import Partner
 from tenants.models import Currency
@@ -310,6 +311,35 @@ def test_profile_exposes_sale_price_and_margin(env):
     assert prof["sale_price_source"] == "product"
     # آخر سعر شراء من الفاتورة المرحّلة (لا من متوسط التكلفة)
     assert Decimal(prof["last_purchase_price"]) == Decimal("100")
+
+
+def test_profile_last_purchase_matches_the_list_truth(env):
+    """كرت المنتج وقائمة المنتجات رقمان لحقيقة واحدة: آخر سعر شراء.
+
+    الأرقام متمايزة (أقلّ ٢٠ · آخر ٤٠ · متوسط ٣٠) فلو قرأ الكرت الأقلّ أو سقط
+    إلى متوسط التكلفة لسقط الاختبار — والكرت والقائمة يقرآن الخريطة نفسها
+    (`core.pricing.last_purchase_prices_base_currency`) لا نسختين من القاعدة.
+    """
+    tenant, ils, sup, product = env
+    for number, date, price in (("PP-LOW", "2026-06-01", 20), ("PP-LAST", "2026-06-20", 40)):
+        inv = PurchaseInvoice.objects.create(
+            tenant=tenant, invoice_number=number, partner=sup, currency=ils,
+            invoice_date=date, is_posted=True)
+        PurchaseInvoiceItem.objects.create(
+            invoice=inv, product=product, name="منتج",
+            quantity=Decimal("1"), unit_price=Decimal(str(price)),
+            total_price=Decimal(str(price)))
+    product.avg_cost = Decimal("30")
+    product.save(update_fields=["avg_cost"])
+
+    prof = product_profile(tenant_id=tenant.TenantID, product_id=product.id)
+    truth = last_purchase_prices_base_currency(
+        tenant_id=tenant.TenantID, product_ids=[product.id])[product.id]
+
+    assert Decimal(prof["last_purchase_price"]) == Decimal("40.0000")
+    assert prof["last_purchase_price"] == truth["unit_price"]
+    assert Decimal(prof["indicative_purchase_price"]) == Decimal("20.0000")
+    assert Decimal(prof["avg_cost"]) == Decimal("30")
 
 
 def test_profile_sale_price_falls_back_to_last_invoice(env):

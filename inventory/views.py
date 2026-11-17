@@ -575,9 +575,30 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
         context = self.get_serializer_context()
         context['product_attachments'] = attachment_map
         context['serial_requirement_map'] = self._serial_requirement_map(products)
+        # ITEM-PURCHASE-DISPLAY: نطاقُ خريطة «آخر سعر شراء» = هذه الصفوف وحدها
+        # (بعد التقسيم وإكمال العائلات) — لا كلُّ بنود شراء الشركة.
+        context['last_purchase_price_product_ids'] = [product.id for product in products]
         serializer = self.get_serializer(products, many=True, context=context)
         if page is not None:
             return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    def _last_purchase_scope(self, product_ids):
+        """ITEM-PURCHASE-DISPLAY: نطاقُ خريطة «آخر سعر شراء» = الصفوف المُسلسَلة
+        وحدها، يقرؤه `inventory.serializers._last_purchase_price_map` من
+        `context` فيحسب الخريطة مرّةً واحدة لهذا النطاق. القائمةُ تضع المفتاح
+        بنفسها (صفوفُها تُعرَف بعد التقسيم وإكمال العائلات)؛ وردُّ الصفّ المفرد
+        يمرّ من هنا فلا يُمسَح كلُّ الشركة لأجل منتجٍ واحد."""
+        context = self.get_serializer_context()
+        context['last_purchase_price_product_ids'] = product_ids
+        return context
+
+    def retrieve(self, request, *args, **kwargs):
+        """الافتراضي يبني `context` بلا نطاقٍ لخريطة «آخر سعر شراء» فيمسح بنود
+        شراء الشركة كلها لأجل صفٍّ واحد — والصفّ المفرد نطاقُه هو."""
+        instance = self.get_object()
+        serializer = self.get_serializer(
+            instance, context=self._last_purchase_scope([instance.id]))
         return Response(serializer.data)
 
     def _serial_requirement_map(self, products):
@@ -662,7 +683,9 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
             description=f'أضاف المنتج «{product_label}»',
             request=request,
         )
-        return Response(self.get_serializer(product).data, status=status.HTTP_201_CREATED)
+        return Response(self.get_serializer(
+            product, context=self._last_purchase_scope([product.id])).data,
+            status=status.HTTP_201_CREATED)
 
     def perform_destroy(self, instance):
         # #20: حذف آخر براندٍ تحت منتجٍ يترك أباً بلا أبناء — «منتج بلا
@@ -737,7 +760,8 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
                 metadata={'changes': changes},
                 request=request,
             )
-        return Response(self.get_serializer(product).data)
+        return Response(self.get_serializer(
+            product, context=self._last_purchase_scope([product.id])).data)
 
     @action(detail=True, methods=['delete'], url_path='datasheets/(?P<att_id>[0-9]+)')
     def remove_datasheet(self, request, pk=None, att_id=None):
@@ -1457,7 +1481,8 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
             metadata={'is_active': value},
             request=request,
         )
-        return Response(self.get_serializer(product).data)
+        return Response(self.get_serializer(
+            product, context=self._last_purchase_scope([product.id])).data)
 
     @action(detail=False, methods=['post'], url_path='bulk-set-active')
     @requires_perm('inventory.item.manage')

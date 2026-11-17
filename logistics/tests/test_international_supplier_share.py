@@ -10,7 +10,12 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APIClient
 
-from core.pricing import PriceStrategy, purchase_price_list, resolve_purchase_price
+from core.pricing import (
+    PriceStrategy,
+    last_purchase_prices_base_currency,
+    purchase_price_list,
+    resolve_purchase_price,
+)
 from core.reports import run_report
 from logistics.tests.test_purchase_return_posting import _posted_international, env  # noqa: F401
 
@@ -50,3 +55,9 @@ def test_last_purchase_price_is_the_supplier_price_not_landed(env):
     assert Decimal(resolved["unit_price"]) == Decimal("70.0000")  # لا 100 المحمَّل
     listed = purchase_price_list(tenant_id=tenant.TenantID)[product.id]
     assert Decimal(listed["unit_price"]) == Decimal("70.0000")
+    # قراءةُ القائمة/الكرت الدفعية تُرجع **سعر المورد نفسه** — لا المحمَّل.
+    # رقمٌ ثالث (100) هنا يعني خريطةً تحسب المحمَّل بينما المسترجع يحسب الحصّة،
+    # فتختلف القائمة عن الكرت في الحقيقة الواحدة.
+    bulk = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)[product.id]
+    assert Decimal(bulk["unit_price"]) == Decimal("70.0000")
+    assert bulk["unit_price"] == resolved["unit_price"]

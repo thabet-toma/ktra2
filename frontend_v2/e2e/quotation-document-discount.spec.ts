@@ -136,6 +136,6 @@ test('خصم العرض يُكتب في الأسفل ويسبق الضريبة،
 
   // تكلفة الصنف وأسعاره من داخل العرض — البطاقة المشتركة نفسها.
   await page.getByTitle('بطاقة المنتج — التكلفة والأسعار').click();
-  await expect(page.getByText('سعر التكلفة (متوسط)')).toBeVisible();
+  await expect(page.getByText('متوسط تكلفة المخزون')).toBeVisible();
   await expect(page.getByText('62.5').first()).toBeVisible();
 });

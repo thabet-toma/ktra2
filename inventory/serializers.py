@@ -202,6 +202,35 @@ class ProductStorageLocationWriteSerializer(serializers.ModelSerializer):
         return attrs
 
 
+def _last_purchase_price_map(context) -> dict:
+    """ITEM-PURCHASE-DISPLAY: خريطة «آخر سعر شراء»
+    (`core.pricing.last_purchase_prices_base_currency`) مخبَّأةً في `context`
+    الطلب — تُحسب **مرّةً واحدة** لكل قائمة/صفحة مهما بلغ عدد صفوفها، لا لكل
+    صفّ (نفس نمط `_indicative_purchase_price_map`). **ونطاقُها الصفوفُ
+    المُسلسَلة وحدها**: `last_purchase_price_product_ids` يمرّره
+    `ProductViewSet` (صفوفُ الصفحة بعد إكمال العائلات، أو منتجٌ مفرد في
+    `retrieve` وردَّي الإنشاء/التعديل) فلا يُمسَح كلُّ بنود شراء الشركة لأجل
+    صفٍّ واحد. غيابُ النطاق (سيريالايزر خارج مسارات العرض) يُبقي المسح على
+    الشركة كما كان، ولا يُجمَّد المخبأ على أوّل صفّ: النطاق يُعرَف قبل الصفوف
+    لا منها. غياب `request`/الشركة ⇒ خريطةٌ فارغة، لا استثناء."""
+    if '_last_purchase_price_map' not in context:
+        request = context.get('request')
+        tenant_id = None
+        if request is not None:
+            from core.tenant_utils import get_tenant
+            tenant = get_tenant(request)
+            tenant_id = tenant.TenantID if tenant else None
+        if tenant_id:
+            from core.pricing import last_purchase_prices_base_currency
+            context['_last_purchase_price_map'] = last_purchase_prices_base_currency(
+                tenant_id=tenant_id,
+                product_ids=context.get('last_purchase_price_product_ids'),
+            )
+        else:
+            context['_last_purchase_price_map'] = {}
+    return context['_last_purchase_price_map']
+
+
 def _indicative_purchase_price_map(context) -> dict:
     """#133: خريطة «السعر التقديري» (`core.pricing.indicative_purchase_prices`)
     مخبَّأةً في `context` الطلب — تُحسب **مرّةً واحدة** لكل قائمة/صفحة مهما
@@ -257,9 +286,15 @@ class ProductSerializer(serializers.ModelSerializer):
     # المشتريات = الوارد التراكمي (IN). المتوسط الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3.
     purchased_qty = serializers.SerializerMethodField()
     avg_monthly_sales = serializers.SerializerMethodField()
+    # ITEM-PURCHASE-DISPLAY: «آخر سعر شراء» — الرقم الأساسي المعروض في القائمة
+    # (أحدث فاتورة شراء مرحَّلة، بالعملة الأساسية). خريطةٌ واحدة للقائمة كلّها
+    # (`_last_purchase_price_map`) لا استعلامَ لكل صفّ، و`null` لمنتجٍ بلا شراءٍ
+    # مرحَّل — لا سقوطَ إلى `avg_cost`.
+    last_purchase_price = serializers.SerializerMethodField()
     # #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة (لا كل
-    # الفترات، ولا avg_cost). خريطةٌ واحدة للقائمة كلّها (`_indicative_purchase_price_map`)
-    # لا استعلامَ لكل صفّ.
+    # الفترات، ولا avg_cost) — يبقى مستقلاً عن «آخر سعر شراء» فوقه ويُعرض خلف
+    # «تفاصيل السعر» في الجدول. خريطةٌ واحدة للقائمة كلّها
+    # (`_indicative_purchase_price_map`) لا استعلامَ لكل صفّ.
     indicative_purchase_price = serializers.SerializerMethodField()
     indicative_purchase_price_source = serializers.SerializerMethodField()
     # #233: سببٌ يفرض الرقم التسلسلي على هذا المنتج (نصُّه من مزوِّدٍ خارج
@@ -308,7 +343,10 @@ class ProductSerializer(serializers.ModelSerializer):
             # كرت المنتج: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
             'sale_price',
             'purchased_qty', 'avg_monthly_sales',
-            # #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة.
+            # ITEM-PURCHASE-DISPLAY: آخر سعر شراء (الأساسي في القائمة) ومنتجٌ بلا
+            # شراء مرحَّل يعرضه `null`؛ و«أقلّ شراء ضمن آخر ٥» (#133) يبقى حقلاً
+            # مستقلاً يُعرض خلف تفاصيل الصفّ.
+            'last_purchase_price',
             'indicative_purchase_price', 'indicative_purchase_price_source',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
@@ -412,6 +450,10 @@ class ProductSerializer(serializers.ModelSerializer):
         returned = getattr(obj, 'returned_qty_90d', None) or 0
         net = _D(str(sold)) - _D(str(returned))
         return str((net / _D('3')).quantize(_D('0.01')))
+
+    def get_last_purchase_price(self, obj):
+        row = _last_purchase_price_map(self.context).get(obj.id)
+        return row['unit_price'] if row else None
 
     def get_indicative_purchase_price(self, obj):
         row = _indicative_purchase_price_map(self.context).get(obj.id)

@@ -19,6 +19,8 @@ export type ItemsTreeProductRow = {
   name_ar: string;
   name_en: string;
   display_name: string;
+  /** البراند (يظهر بين قوسين في الاسم، ويُسمّى في صفّ العائلة المجمّع). */
+  brand?: string | null;
   category: number | null;
   category_name: string;
   quantity_on_hand: string;
@@ -30,6 +32,14 @@ export type ItemsTreeProductRow = {
   stock_status: string;
   has_group: boolean;
   group_key: string | null;
+  /** ITEM-PURCHASE-DISPLAY: آخر سعر شراء (آخر فاتورة شراء مرحَّلة) — null بلا تاريخ. */
+  last_purchase_price?: string | null;
+  /** #133: أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة (خلف «تفاصيل السعر» في الجدول). */
+  indicative_purchase_price?: string | null;
+  indicative_purchase_price_source?: string | null;
+  /** #23: براندات المنتج الواحد تتجمّع في صفٍّ واحد — الصفّ يحمل اسم الأب ومعرّفه. */
+  family_id?: number | null;
+  family_name?: string | null;
   /** C3: عدد براندات العائلة — تقرؤه نافذة النقل لتحذير انتقال المنتج كلّه
    *  ببرانداته. */
   family_brand_count?: number;
@@ -55,12 +65,19 @@ export const PRODUCTS: ItemsTreeProductRow[] = [
     category: 3, category_name: 'إطارات', quantity_on_hand: '12', reserved_quantity: '0',
     available_quantity: '12', avg_cost: '30', sale_price: '45', min_stock_level: 2,
     stock_status: 'in_stock', has_group: false, group_key: null,
+    // ITEM-PURCHASE-DISPLAY: ثلاثة أرقام متمايزة — متوسط ٣٠ · أقلّ ٢٠ · آخر ٤٠ —
+    // فأيّ توصيلٍ خاطئ في الجدول أو الكرت يسقط الاختبار برقمٍ ظاهر.
+    last_purchase_price: '40', indicative_purchase_price: '20',
+    indicative_purchase_price_source: 'أقل شراء (آخر ٥)',
   },
   {
     id: 8, sku: 'SKU-8', name_ar: 'بطارية 70A', name_en: '', display_name: 'بطارية 70A',
     category: 3, category_name: 'إطارات', quantity_on_hand: '0', reserved_quantity: '0',
     available_quantity: '0', avg_cost: '55', sale_price: '80', min_stock_level: 1,
     stock_status: 'out_of_stock', has_group: false, group_key: null,
+    // بلا شراء مرحَّل: الفراغ يبقى فراغاً في القائمة والكرت — لا ٥٥ متوسطَ التكلفة.
+    last_purchase_price: null, indicative_purchase_price: null,
+    indicative_purchase_price_source: null,
   },
 ];
 
@@ -79,8 +96,9 @@ const PROFILE_7 = {
   avg_cost: '30', inventory_valuation: '360', purchased_qty: '20', purchased_value: '600',
   sold_qty: '8', sold_value: '360', avg_weekly_sales: '1', avg_monthly_sales: '4',
   sale_price: '45', last_sale_price: '45', last_sale_invoice: 'INV-1', last_sale_date: '2026-08-01',
-  last_purchase_price: '30', effective_sale_price: '45', sale_price_source: 'product',
+  last_purchase_price: '40', effective_sale_price: '45', sale_price_source: 'product',
   profit_per_unit: '15', profit_margin_pct: '33.33', sale_valuation: '540',
+  indicative_purchase_price: '20', indicative_purchase_price_label: 'أقل شراء (آخر ٥)',
 };
 
 export type ItemsTreeStubsOptions = {
@@ -195,6 +213,7 @@ function createdProductRow(
     quantity_on_hand: '0', reserved_quantity: '0', available_quantity: '0', avg_cost: '0',
     sale_price: sent.sale_price ?? null,
     purchased_qty: '0', avg_monthly_sales: '0',
+    last_purchase_price: null,
     indicative_purchase_price: null, indicative_purchase_price_source: null,
     stock_status: 'out_of_stock', group_key: null,
     has_group: false, family_id: null, family_name: null,
@@ -494,7 +513,17 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
       body = known;
     } else if (/\/inventory\/products\/\d+\/profile\/$/.test(path)) {
       const id = Number(path.match(/products\/(\d+)\/profile/)![1]);
-      body = id === 7 ? PROFILE_7 : { ...PROFILE_7, id, sku: `SKU-${id}`, name: 'بطارية 70A' };
+      const row = products.find((p) => p.id === id);
+      body = {
+        ...(id === 7 ? PROFILE_7 : { ...PROFILE_7, id, sku: `SKU-${id}`, name: 'بطارية 70A' }),
+        // ITEM-PURCHASE-DISPLAY: حقول سعر الشراء **ومتوسط التكلفة** تُشتقّ من صفّ
+        // القائمة نفسه، فالكرت والقائمة رقمان لحقيقةٍ واحدة — محاكٍ يخترع رقماً
+        // لا تراه القائمة يخفي عطباً (وقد كشفه رأس الكرت: ٣٠ للبطارية مقابل ٥٥ في صفّها).
+        avg_cost: row?.avg_cost ?? PROFILE_7.avg_cost,
+        last_purchase_price: row?.last_purchase_price ?? null,
+        indicative_purchase_price: row?.indicative_purchase_price ?? null,
+        indicative_purchase_price_label: row?.indicative_purchase_price_source ?? null,
+      };
     } else if (/\/inventory\/products\/\d+\/stock-ledger\/$/.test(path)) {
       body = { count: 0, results: [] };
     } else if (/\/inventory\/products\/\d+\/invoices\/$/.test(path)) {

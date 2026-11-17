@@ -42,6 +42,11 @@ export interface SqlProduct {
   purchased_qty?: string | null;
   /** W8: متوسط المبيعات الشهري = صافي (OUT−RETURN_IN) 90ي ÷ 3. */
   avg_monthly_sales?: string | null;
+  /** ITEM-PURCHASE-DISPLAY: آخر سعر شراء — أحدث فاتورة شراء **مرحَّلة**، بالعملة
+   *  الأساسية (سعر المورد بعد حصّته في الدولية). الرقم الأساسي المعروض في
+   *  القائمة ورأس الكرت. غائبٌ (null) لمنتجٍ بلا شراء مرحَّل — لا سقوط لمتوسط
+   *  التكلفة. */
+  last_purchase_price?: string | null;
   /** #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة (لا
    *  avg_cost ولا كل الفترات). غائبٌ (null) لمنتجٍ بلا شراء مرحَّل — لا صفر. */
   indicative_purchase_price?: string | null;

@@ -1389,7 +1389,7 @@ export const ItemForm: React.FC<Props> = ({
             value={form.sale_price} onChange={(e) => patch("sale_price", e.target.value)}
             title="يُقترح في مستند البيع فقط للزبون الذي لا عرض سعر له ولا شراء سابق لهذا المنتج"
             placeholder="للزبون بلا عرض ولا شراء سابق" />)}
-        {fld("سعر التكلفة (متوسط — محسوب)",
+        {fld("متوسط تكلفة المخزون (محسوب)",
           <input className="ktra-input" readOnly value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
         {fld("الربح للوحدة",
           <input className="ktra-input" readOnly style={{ color: profitTone, fontWeight: 600 }}
@@ -1403,6 +1403,10 @@ export const ItemForm: React.FC<Props> = ({
         {fld("آخر سعر شراء (فاتورة مرحّلة)",
           <input className="ktra-input" readOnly
             value={formatMoney(insights.profile?.last_purchase_price ?? "", "—")} />)}
+        {fld("أقلّ شراء (آخر ٥)",
+          <input className="ktra-input" readOnly
+            title="أقلّ سعر شراء ضمن آخر ٥ فواتير شراء مرحَّلة — لا متوسط التكلفة"
+            value={formatMoney(insights.profile?.indicative_purchase_price ?? "", "—")} />)}
       </div>
       <div style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)", marginBottom: 6 }}>
         الشريحة الأولى للبيع تدخل تسعير الفواتير حين لا يكون للزبون عرضُ سعرٍ ولا شراءٌ
@@ -1730,10 +1734,16 @@ export const ItemForm: React.FC<Props> = ({
               onChange={(e) => patch("item_type", e.target.value)}>
               {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
             </select>)}
-            {/* الأرقام القيادية في شريط الرأس — تُرى قبل فتح أي تبويب. */}
+            {/* الأرقام القيادية في شريط الرأس — تُرى قبل فتح أي تبويب.
+                ITEM-PURCHASE-DISPLAY: آخر سعر شراء و«أقلّ شراء (آخر ٥)» بجانب
+                متوسط تكلفة المخزون — ثلاثة مفاهيم منفصلة، لا رقمٌ واحد بلافتتين. */}
             {fld("سعر البيع", <input className="ktra-input" readOnly
               value={formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, "—")} />)}
-            {fld("سعر التكلفة", <input className="ktra-input" readOnly
+            {fld("آخر سعر شراء", <input className="ktra-input" readOnly
+              value={formatMoney(insights.profile?.last_purchase_price ?? "", "—")} />)}
+            {fld("أقلّ شراء (آخر ٥)", <input className="ktra-input" readOnly
+              value={formatMoney(insights.profile?.indicative_purchase_price ?? "", "—")} />)}
+            {fld("متوسط تكلفة المخزون", <input className="ktra-input" readOnly
               value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
             {fld("الرصيد", <input className="ktra-input" readOnly
               value={formatQuantity(insights.profile?.quantity_on_hand ?? "", "—")} />)}
@@ -1760,7 +1770,7 @@ export const ItemForm: React.FC<Props> = ({
           <div style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)", padding: "4px 0", display: "grid", gap: 2 }}>
             <div>سعر البيع: <b style={{ color: "var(--ktra-ink)" }}>
               {formatMoney(insights.profile?.effective_sale_price ?? form.sale_price, "—")}</b></div>
-            <div>سعر التكلفة: <b style={{ color: "var(--ktra-ink)" }}>
+            <div>متوسط تكلفة المخزون: <b style={{ color: "var(--ktra-ink)" }}>
               {formatMoney(insights.profile?.avg_cost ?? "", "—")}</b></div>
             <div>الربح للوحدة: <b style={{ color: profitTone }}>
               {formatMoney(insights.profile?.profit_per_unit ?? (previewProfit ?? ""), "—")}</b></div>

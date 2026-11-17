@@ -1711,20 +1711,19 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
     # كرت المنتج الاحترافي: سعر البيع (المحفوظ أو آخر سعر فعلي) مقابل التكلفة،
     # فالربح والهامش يُشتقّان خادمياً — لا تحسبهما الواجهة فيختلف رقمان لحقيقة واحدة.
     from sales.services import last_sale_price as _last_sale_price
-    from core.pricing import PriceStrategy, resolve_purchase_price
 
     sale_price = Decimal(str(p.sale_price)) if p.sale_price is not None else None
     last_sale = _last_sale_price(tenant_id=tenant_id, product_id=product_id)
     last_sale_val = Decimal(last_sale['unit_price']) if last_sale['unit_price'] else None
 
-    last_purchase = resolve_purchase_price(
-        tenant_id=tenant_id, product_id=product_id, strategy=PriceStrategy.LAST_PURCHASE)
-    # الرجوع لمتوسط التكلفة ليس «آخر سعر شراء» — فبلا تاريخ شراء يبقى فارغاً.
-    last_purchase_val = (
-        Decimal(last_purchase['unit_price'])
-        if last_purchase['unit_price'] and last_purchase['strategy_used'] != PriceStrategy.DEFAULT
-        else None
-    )
+    # ITEM-PURCHASE-DISPLAY: «آخر سعر شراء» من **نفس** خريطة جدول المنتجات
+    # (`core.pricing.last_purchase_prices_base_currency`) لا مسترجعٍ ثانٍ قد
+    # يفترق عنها. ومنتجٌ بلا تاريخ شراء يبقى فارغاً: الرجوع لمتوسط التكلفة
+    # ليس «آخر سعر شراء».
+    from core.pricing import last_purchase_prices_base_currency
+    last_purchase = last_purchase_prices_base_currency(
+        tenant_id=tenant_id, product_ids=[product_id]).get(product_id)
+    last_purchase_val = Decimal(last_purchase['unit_price']) if last_purchase else None
 
     # #133: السعر التقديري — أقلّ سعرٍ ضمن آخر INDICATIVE_PRICE_INVOICE_WINDOW
     # فاتورة شراء مرحَّلة لهذا المنتج. رقمُ قراءةٍ وتفاوضٍ لا تكلفة — لا يمسّ

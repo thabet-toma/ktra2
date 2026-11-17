@@ -66,6 +66,10 @@ export interface ProductProfileData {
   last_sale_invoice?: string | null;
   last_sale_date?: string | null;
   last_purchase_price?: string | null;
+  /** ITEM-PURCHASE-DISPLAY: «أقلّ شراء (آخر ٥)» ولافتة نافذته — مستقلّان عن
+   *  `last_purchase_price` وعن `avg_cost` (رقمُ تفاوضٍ لا كلفة). */
+  indicative_purchase_price?: string | null;
+  indicative_purchase_price_label?: string | null;
   effective_sale_price?: string | null;
   sale_price_source?: "product" | "last_invoice" | null;
   profit_per_unit?: string | null;
@@ -162,8 +166,8 @@ export const ProductOverview: React.FC<{
           hint={source ? SALE_SOURCE_LABEL[source] : "لا سعر بيع محفوظ ولا فاتورة بيع سابقة"}
           tone={source === "product" ? "ok" : undefined}
         />
-        <Kpi label="سعر التكلفة (متوسط)" value={formatMoney(profile.avg_cost, "—")}
-          hint="المتوسط المرجّح لمشتريات المنتج المرحّلة" />
+        <Kpi label="متوسط تكلفة المخزون" value={formatMoney(profile.avg_cost, "—")}
+          hint="قيمة البضاعة المتاحة ÷ كميّتها (بالعملة الأساسية) — رقمُ تقييمٍ لا سعر شراء" />
         <Kpi
           label="الربح للوحدة"
           value={formatMoney(profile.profit_per_unit ?? "", "—")}
@@ -182,6 +186,8 @@ export const ProductOverview: React.FC<{
             : "لا فاتورة بيع مرحّلة لهذا المنتج"} />
         <Kpi label="آخر سعر شراء" value={formatMoney(profile.last_purchase_price ?? "", "—")}
           hint="من آخر فاتورة شراء مرحّلة (لا من متوسط التكلفة)" />
+        <Kpi label="أقلّ شراء (آخر ٥)" value={formatMoney(profile.indicative_purchase_price ?? "", "—")}
+          hint={`${profile.indicative_purchase_price_label || "أقل شراء (آخر ٥)"} — من فواتير الشراء المرحَّلة وحدها، لا متوسط التكلفة`} />
         <Kpi label="القيمة البيعية للمخزون" value={formatMoney(profile.sale_valuation ?? "", "—")}
           hint="الرصيد × سعر البيع" />
         <Kpi label="تقييم المخزون (بالتكلفة)" value={formatMoney(profile.inventory_valuation, "—")} />

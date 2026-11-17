@@ -42,6 +42,9 @@ _ARABIC_DIGITS = str.maketrans("0123456789", "٠١٢٣٤٥٦٧٨٩")
 INDICATIVE_PRICE_LABEL = (
     f"أقل شراء (آخر {str(INDICATIVE_PRICE_INVOICE_WINDOW).translate(_ARABIC_DIGITS)})"
 )
+# ITEM-PURCHASE-DISPLAY: لافتة «آخر سعر شراء» المعروضة في قائمة المنتجات ورأس
+# كرت المنتج — ثابتٌ واحد كي لا تفترق اللافتة عن الرقم الذي يحملها.
+LAST_PURCHASE_PRICE_LABEL = "آخر سعر شراء"
 
 
 class PriceStrategy:
@@ -440,6 +443,88 @@ def indicative_purchase_prices(
     "supplier_name"}}.
     """
     return _purchase_lowest_prices_base_currency(tenant_id=tenant_id, product_ids=product_ids)
+
+
+def last_purchase_prices_base_currency(
+    *, tenant_id: int, product_ids=None,
+) -> dict[int, dict]:
+    """ITEM-PURCHASE-DISPLAY: «آخر سعر شراء» لكل منتج — أحدثُ فاتورة شراء
+    **مرحَّلة**، بالعملة الأساسية.
+
+    سؤالٌ مختلفٌ عن «أقلّ شراء (آخر ٥)» (`indicative_purchase_prices`) وعن كلفة
+    المخزون (`Product.avg_cost`): آخر سعرٍ سُجِّل فعلاً في سطر شراءٍ مرحَّل — لا
+    الأقلّ ولا متوسطاً، وبلا نافذة فواتير (الأحدث وحده هو السؤال). يُقرأ منه
+    جدولُ المنتجات ورأسُ كرت المنتج معاً فلا يفترق رقمان لحقيقةٍ واحدة.
+
+    الاختيار مطابقٌ حرفياً لـ`resolve_purchase_price(LAST_PURCHASE)` بلا مورد:
+    الأحدث بـ`(-invoice_date, -invoice_id, -id)` — فتاريخان متساويان يُحسَم
+    أمرهما بمعرّف الفاتورة ثم معرّف السطر، لا بترتيبٍ عشوائي. والسعر سعرُ
+    المورد: `_supplier_unit_price` (سعرُ البند المحمَّل × حصّة المورد في
+    الفاتورة الدولية) ثم يُحوَّل بسعر صرف **سطر** الفاتورة أو فاتورتها
+    (`_src_purchase_rate`) إلى العملة الأساسية — كما يفعل المسترجع تماماً.
+
+    **بلا سقوطٍ إلى `avg_cost`** (خلافاً لـ`purchase_price_list` الذي يملأ
+    «آخر شراء» بمتوسط التكلفة حين لا تاريخ): متوسط التكلفة ليس سعر شراء. منتجٌ
+    بلا شراءٍ مرحَّل **يغيب** من القاموس المُعاد، والواجهة تعرض «—».
+
+    استعلامان ثابتان مهما بلغ عدد المنتجات — مسحُ بنود الشراء (أوّلُ ظهورٍ
+    للمنتج بعد الترتيب) وخريطةُ حصص الفواتير الدولية — لا استعلامَ لكل صفّ ولا
+    استعلامٌ مترابط لكل منتج. `product_ids` (اختياري) يحصر المسح بصفحةٍ بعينها.
+
+    يُرجع {product_id: {"unit_price", "source_type" ("PURCHASE_INVOICE")،
+    "source_label" (`LAST_PURCHASE_PRICE_LABEL`)، "document_id",
+    "document_number", "document_date", "supplier_id", "supplier_name"}} — نفس
+    شكل `indicative_purchase_prices` حرفياً.
+    """
+    from logistics.models import PurchaseInvoiceItem
+
+    qs = PurchaseInvoiceItem.objects.filter(
+        invoice__tenant_id=tenant_id,
+        invoice__is_posted=True,
+        unit_price__gt=0,
+    )
+    if product_ids is not None:
+        qs = qs.filter(product_id__in=product_ids)
+
+    # مرورٌ خطّيّ واحدٍ على البنود مرتَّبةً: أوّلُ سطرٍ لكل منتج هو الأحدث —
+    # فالسعر يُحوَّل للمختارين وحدهم، لا لكل بندٍ في الشركة.
+    chosen: dict[int, PurchaseInvoiceItem] = {}
+    for item in (
+        qs.select_related("invoice", "invoice__partner")
+        .order_by("product_id", "-invoice__invoice_date", "-invoice_id", "-id")
+    ):
+        chosen.setdefault(item.product_id, item)
+
+    if not chosen:
+        return {}
+
+    ratios = _international_supplier_ratios(
+        tenant_id, invoice_ids=list({item.invoice_id for item in chosen.values()}),
+    )
+
+    result: dict[int, dict] = {}
+    for product_id, item in chosen.items():
+        price = _convert_currency(
+            _supplier_unit_price(item, ratios),
+            source_rate=_src_purchase_rate(item),
+            target_rate=Decimal("1"),
+        )
+        inv = item.invoice
+        result[product_id] = {
+            "unit_price": str(price.quantize(_UNIT_Q)),
+            "source_type": "PURCHASE_INVOICE",
+            "source_label": LAST_PURCHASE_PRICE_LABEL,
+            "document_id": inv.id,
+            "document_number": inv.invoice_number,
+            "document_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
+            "supplier_id": inv.partner_id,
+            "supplier_name": inv.partner.name if inv.partner_id else None,
+        }
+
+    logger.info(
+        "price_list last_purchase tenant=%s -> %s products", tenant_id, len(result),
+    )
+    return result
 
 
 def _lowest_purchase_item(qs):

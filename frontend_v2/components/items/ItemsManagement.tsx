@@ -586,10 +586,15 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const rowsHtml = printableRows.map((p) => {
         const name = esc(labelWithStatus(p.name_ar || p.name_en || p.sku || "", p.is_active));
         const qty = Number(p.quantity_on_hand);
-        // #133: نفس رقم الشاشة (أقلّ شراء ضمن آخر ٥ فواتير) — لا avg_cost —
-        // كي تتطابق الورقة مع الجدول. فراغه (بلا شراء مرحَّل) يُطبع "—" لا صفراً.
-        const indicativePrice = p.indicative_purchase_price != null
-          ? formatMoney(p.indicative_purchase_price) : "—";
+        // ITEM-PURCHASE-DISPLAY: نفس رقم الشاشة — آخر سعر شراء في فاتورة شراء
+        // **مرحَّلة** (لا أقلّ الشراء ولا avg_cost) كي تتطابق الورقة مع الجدول.
+        // فراغه (بلا شراء مرحَّل) يُطبع "—" لا صفراً ولا متوسط تكلفة.
+        const lastPrice = p.last_purchase_price != null
+          ? formatMoney(p.last_purchase_price) : "—";
+        // صفّ المنتج المجمّع يطبع سعر **براندٍ مرجعيٍّ واحد** (بنية التجميع كما
+        // هي) — فالوسم يسمّيه صراحةً بدل أن يدّعي سعراً يمثّل المنتج كلّه.
+        const anchorBrand = (p.family_member_ids?.length ?? 0) > 1
+          ? (p.brand || "").trim() : "";
         const cls = p.stock_status === "out_of_stock" ? "danger" : p.stock_status === "low_stock" ? "warn" : "";
         return `
           <tr>
@@ -597,7 +602,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             <td>${name}</td>
             <td>${esc(p.category_name || "—")}</td>
             <td class="num ${cls}" style="direction: ltr">${qty}</td>
-            <td class="num" style="direction: ltr">${indicativePrice}</td>
+            <td class="num" style="direction: ltr">${lastPrice}${
+              anchorBrand ? `<div class="hint">براند مرجعي: ${esc(anchorBrand)}</div>` : ""}</td>
             <td class="num" style="direction: ltr">${p.min_stock_level ?? "—"}</td>
             <td class="${cls}">${STATUS_LABEL[p.stock_status]}</td>
           </tr>`;
@@ -616,6 +622,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               th { background-color: #f9fafb; color: #374151; font-weight: 600; }
               tr:nth-child(even) { background-color: #fcfcfd; }
               .num { text-align: left; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+              .hint { direction: rtl; text-align: right; font-size: 11px; color: #6b7280; font-family: system-ui, -apple-system, sans-serif; }
               .danger { color: #dc2626; font-weight: bold; }
               .warn { color: #b8800a; font-weight: bold; }
               @media print { body { padding: 0; } @page { margin: 1.5cm; } }
@@ -628,7 +635,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               <thead>
                 <tr>
                   <th>رقم المنتج</th><th>اسم المنتج</th><th>التصنيف</th>
-                  <th>الكمية</th><th>أقلّ شراء (آخر ٥)</th><th>الحد الأدنى</th><th>الحالة</th>
+                  <th>الكمية</th><th>آخر سعر شراء</th><th>الحد الأدنى</th><th>الحالة</th>
                 </tr>
               </thead>
               <tbody>${rowsHtml}</tbody>
@@ -756,15 +763,58 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           {p.sku}
         </b>
     ) },
-    // #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة، لا
-    // avg_cost (رقمُ قراءةٍ وتفاوضٍ لا تكلفة). فراغه لمنتجٍ بلا شراء مرحَّل
-    // يُعرض "—" لا صفراً. غير قابل للفرز خادمياً (لا عمود مخزَّن).
-    { key: "indicative_purchase_price", header: "أقلّ شراء (آخر ٥)", width: "120px", align: "center", numeric: true,
-      render: (p) => (
-        <span title={p.indicative_purchase_price_source || undefined}>
-          {p.indicative_purchase_price != null ? fmt(p.indicative_purchase_price) : "—"}
-        </span>
-      ) },
+    // ITEM-PURCHASE-DISPLAY: «آخر سعر شراء» هو الرقم الأساسي في الخليّة — أحدث
+    // فاتورة شراء **مرحَّلة**، لا أقلّ الشراء ولا avg_cost (رقمُ تفاوضٍ/شراءٍ لا
+    // تكلفة). «أقلّ شراء (آخر ٥)» يبقى مستقلاً خلف `<details>` مغلقةٍ في الخليّة
+    // نفسها — لا عموداً ثانياً يزاحم الرقم الأساسي. غير قابل للفرز خادمياً
+    // (لا عمود مخزَّن).
+    { key: "last_purchase_price", header: "آخر سعر شراء", width: "150px", align: "center", numeric: true,
+      render: (p) => {
+        const groupedCount = p.family_member_ids?.length ?? 0;
+        const grouped = groupedCount > 1;
+        const anchorBrand = (p.brand || "").trim();
+        const last = p.last_purchase_price != null ? fmt(p.last_purchase_price) : "—";
+        const lowest = p.indicative_purchase_price != null ? fmt(p.indicative_purchase_price) : "—";
+        return (
+          <div className="flex w-full flex-col items-center gap-0.5" data-testid="purchase-price-cell">
+            <span
+              className="font-semibold"
+              data-testid="purchase-last-price"
+              title={grouped
+                ? `آخر سعر شراء لبراند «${anchorBrand || "مرجعي"}» وحده — الصفّ مجمّع من ${formatNumber(groupedCount)} براندات`
+                : "آخر سعر شراء في فاتورة شراء مرحَّلة — لا متوسط التكلفة"}
+            >
+              {last}
+            </span>
+            {/* `w-full` على الحاوية والتفاصيل معاً: عمودٌ بعرض 150px لا يسمح
+                لسطر «تفاصيل السعر» بأن يفرض عرضه shrink-to-fit فيزحم الأعمدة. */}
+            <details className="w-full">
+              <summary
+                className="cursor-pointer text-center text-[10px] text-[var(--ktra-ink-soft)] hover:underline"
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+              >
+                تفاصيل السعر
+              </summary>
+              <div className="mt-0.5 flex w-full flex-col gap-0.5 text-[10px] text-[var(--ktra-ink-soft)]">
+                <span
+                  data-testid="purchase-lowest-price"
+                  title={p.indicative_purchase_price_source || undefined}
+                >
+                  أقلّ شراء (آخر ٥): {lowest}
+                </span>
+                {/* الصفّ المجمّع (بنية `utils/familyGrouping` كما هي): الرقم
+                    المرجعي لبراندٍ واحد — يُسمّى صراحةً فلا يُقرأ سعراً للمنتج كلّه. */}
+                {grouped && (
+                  <span data-testid="purchase-price-anchor-hint">
+                    الصفّ مجمّع من {formatNumber(groupedCount)} براندات — السعر لبراند «{anchorBrand || "مرجعي"}» وحده.
+                  </span>
+                )}
+              </div>
+            </details>
+          </div>
+        );
+      } },
     // كرت المنتج: سعر البيع المحفوظ — يُقرأ بجانب التكلفة بلا فتح الكرت.
     { key: "sale_price", header: "سعر البيع", width: "100px", align: "center", numeric: true, sortable: true,
       render: (p) => (

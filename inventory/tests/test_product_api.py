@@ -13,11 +13,30 @@ from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
 from core.models import ActivityLog
+from core.pricing import last_purchase_prices_base_currency
 from inventory.models import Product, ProductCategory, ProductFamily, StockMovement, UnitOfMeasure
 from inventory.services import add_brand_to_family, create_product_with_family
+from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+from partners.models import Partner
+from tenants.models import Currency
 from tenants.services import create_company
 
 PRODUCTS_URL = "/api/inventory/products/"
+
+
+def _posted_purchase(tenant, supplier, product, *, number, date, price):
+    """فاتورة شراء مرحَّلة بسطرٍ واحد — الشكل الحقيقي الذي يقرأه `core.pricing`."""
+    inv = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number=number, partner=supplier,
+        currency=Currency.objects.filter(IsBaseCurrency=True).first(),
+        invoice_date=date, exchange_rate=Decimal("1"), is_posted=True,
+    )
+    PurchaseInvoiceItem.objects.create(
+        invoice=inv, product=product, name="منتج", quantity=Decimal("1"),
+        unit_price=Decimal(str(price)), total_price=Decimal(str(price)),
+    )
+    return inv
+
 
 
 class ProductApiTest(APITestCase):
@@ -303,6 +322,215 @@ class ProductApiTest(APITestCase):
         assert res.status_code == 200, res.content[:300]
         assert len(res.json()) == 10
         assert len(captured) <= 8, [q["sql"] for q in captured]
+
+    # ── «آخر سعر شراء» على قائمة المنتجات (ITEM-PURCHASE-DISPLAY) ──
+    def test_list_exposes_last_purchase_price_apart_from_lowest_and_avg_cost(self):
+        """الرقم الأساسي في القائمة هو آخر سعر شراء — لا الأقلّ ولا متوسط التكلفة.
+
+        الأرقام الثلاثة متمايزة (متوسط ٣٠ · أقلّ ٢٠ · آخر ٤٠) كي يكشف الاختبار
+        أيّ توصيلٍ خاطئ: لو قُرئ الحقل من `indicative_purchase_price` لظهر ٢٠،
+        ولو سقط إلى `avg_cost` لظهر ٣٠.
+        """
+        sup = Partner.objects.create(
+            tenant=self.t_a, name="مورد القائمة", partner_type="Supplier")
+        product = Product.objects.create(
+            tenant=self.t_a, sku="LAST-1", name_ar="منتج الأسعار", avg_cost=Decimal("30"))
+        _posted_purchase(self.t_a, sup, product, number="L-1", date="2026-06-01", price=20)
+        _posted_purchase(self.t_a, sup, product, number="L-2", date="2026-06-15", price=100)
+        _posted_purchase(self.t_a, sup, product, number="L-3", date="2026-06-20", price=40)
+        self._auth()
+
+        res = self._get()
+
+        assert res.status_code == 200, res.content[:300]
+        row = next(r for r in res.json() if r["id"] == product.id)
+        assert Decimal(row["last_purchase_price"]) == Decimal("40.0000")
+        assert Decimal(row["indicative_purchase_price"]) == Decimal("20.0000")
+        assert Decimal(row["avg_cost"]) == Decimal("30")
+
+    def test_list_last_purchase_price_is_null_without_posted_history(self):
+        """بلا شراء مرحَّل يبقى الحقل `null` — لا سقوطَ إلى `avg_cost`.
+
+        الواجهة تعرضه «—»؛ رقمُ متوسط التكلفة مكان سعر الشراء كذبةٌ صامتة.
+        """
+        product = Product.objects.create(
+            tenant=self.t_a, sku="LAST-2", name_ar="بلا شراء", avg_cost=Decimal("30"))
+        self._auth()
+
+        res = self._get()
+
+        assert res.status_code == 200, res.content[:300]
+        row = next(r for r in res.json() if r["id"] == product.id)
+        assert row["last_purchase_price"] is None
+        assert row["indicative_purchase_price"] is None
+
+    def test_list_last_purchase_price_is_tenant_scoped(self):
+        """فاتورة شركةٍ أخرى (ولو كانت أحدث) لا تُسرَّب إلى صفّ هذه الشركة."""
+        sup = Partner.objects.create(
+            tenant=self.t_a, name="مورد محلي", partner_type="Supplier")
+        product = Product.objects.create(
+            tenant=self.t_a, sku="LAST-3", name_ar="منتج مشترك", avg_cost=Decimal("0"))
+        _posted_purchase(self.t_a, sup, product, number="LOC-1", date="2026-06-01", price=40)
+        foreign_sup = Partner.objects.create(
+            tenant=self.t_b, name="مورد أجنبي", partner_type="Supplier")
+        _posted_purchase(self.t_b, foreign_sup, product, number="FOR-1",
+                         date="2026-07-01", price=1)
+        self._auth()
+
+        res = self._get()
+
+        assert res.status_code == 200, res.content[:300]
+        row = next(r for r in res.json() if r["id"] == product.id)
+        assert Decimal(row["last_purchase_price"]) == Decimal("40.0000")
+
+    def test_list_last_purchase_price_adds_no_query_per_row(self):
+        """الحقل يُقرأ من خريطةٍ واحدة للصفحة — لا استعلامَ لكل صفّ.
+
+        القائمة كاملةً تُقاس مرّتين: صفٌّ واحد وستةُ صفوف. تساوي العددين هو
+        البرهان؛ رقمٌ ثابتٌ مطلقٌ يكذب مع كل إضافةٍ إلى `get_serializer_context`.
+        """
+        sup = Partner.objects.create(
+            tenant=self.t_a, name="مورد الدفعة", partner_type="Supplier")
+        products = []
+        for i in range(6):
+            p = Product.objects.create(
+                tenant=self.t_a, sku=f"LASTQ-{i}", name_ar=f"منتج دفعة {i}",
+                avg_cost=Decimal("0"))
+            _posted_purchase(self.t_a, sup, p, number=f"LQ-{i}",
+                             date=f"2026-06-0{i + 1}", price=10 + i)
+            products.append(p)
+        self._auth()
+
+        with CaptureQueriesContext(connection) as small:
+            one = self._get("?search=LASTQ-0")
+        with CaptureQueriesContext(connection) as large:
+            many = self._get()
+
+        assert len(one.json()) == 1
+        assert len(many.json()) == 6
+        assert len(large) == len(small), [q["sql"] for q in large]
+
+    # ── ITEM-PURCHASE-DISPLAY: نطاقُ خريطة آخر سعر شراء = الصفوف المعروضة ──
+    def _scope_calls(self, spy):
+        """نطاقُ كلّ نداءٍ للدالّة الحقيقية (`product_ids`) — لا نتيجةً مُستبدلة.
+
+        البرهان نطاقُ النداء نفسه لا الرقم المعروض: الخريطةُ الشاملة تُرجع الرقم
+        الصحيح أيضاً، فما يفرّقها عمّا يجب هو ما طُلب مسحُه.
+        """
+        return [call.kwargs.get("product_ids") for call in spy.call_args_list]
+
+    def test_filtered_list_does_not_load_purchase_prices_for_unshown_products(self):
+        """قائمةٌ مُرشَّحة لا تُحمِّل أسعار شراء منتجات الشركة التي لا تُعرَض.
+
+        المنتجات الأخرى من **الشركة نفسها** عمداً: العزل بين الشركات يخفي
+        العَرَض ويُوهم أنّ النطاق ضُبط.
+        """
+        sup = Partner.objects.create(
+            tenant=self.t_a, name="مورد النطاق", partner_type="Supplier")
+        wanted = Product.objects.create(
+            tenant=self.t_a, sku="SCOPE-1", name_ar="المطلوب", avg_cost=Decimal("0"))
+        _posted_purchase(self.t_a, sup, wanted, number="SC-1", date="2026-06-01", price=40)
+        for i in range(3):
+            noise = Product.objects.create(
+                tenant=self.t_a, sku=f"NOISE-{i}", name_ar=f"غير مطلوب {i}",
+                avg_cost=Decimal("0"))
+            _posted_purchase(self.t_a, sup, noise, number=f"NZ-{i}",
+                             date="2026-06-02", price=900 + i)
+        self._auth()
+
+        with patch("core.pricing.last_purchase_prices_base_currency",
+                   wraps=last_purchase_prices_base_currency) as spy:
+            res = self._get("?search=SCOPE-1")
+
+        assert res.status_code == 200, res.content[:300]
+        rows = res.json()
+        assert [row["id"] for row in rows] == [wanted.id]
+        assert Decimal(rows[0]["last_purchase_price"]) == Decimal("40.0000")
+        assert self._scope_calls(spy) == [[wanted.id]], self._scope_calls(spy)
+
+    def test_retrieve_does_not_load_purchase_prices_for_other_products(self):
+        """الصفّ المفرد لم يعد يمسح بنود شراء الشركة كلها لأجل رقمٍ واحد."""
+        sup = Partner.objects.create(
+            tenant=self.t_a, name="مورد الكرت", partner_type="Supplier")
+        wanted = Product.objects.create(
+            tenant=self.t_a, sku="ONE-1", name_ar="الكرت", avg_cost=Decimal("0"))
+        _posted_purchase(self.t_a, sup, wanted, number="ON-1", date="2026-06-01", price=40)
+        for i in range(3):
+            noise = Product.objects.create(
+                tenant=self.t_a, sku=f"ONE-N{i}", name_ar=f"جار {i}", avg_cost=Decimal("0"))
+            _posted_purchase(self.t_a, sup, noise, number=f"ON-N{i}",
+                             date="2026-06-02", price=70 + i)
+        self._auth()
+
+        with patch("core.pricing.last_purchase_prices_base_currency",
+                   wraps=last_purchase_prices_base_currency) as spy:
+            res = self.client.get(
+                f"{PRODUCTS_URL}{wanted.id}/", HTTP_X_TENANT_ID=self._tenant_id)
+
+        assert res.status_code == 200, res.content[:300]
+        assert Decimal(res.json()["last_purchase_price"]) == Decimal("40.0000")
+        assert self._scope_calls(spy) == [[wanted.id]], self._scope_calls(spy)
+
+    def test_paginated_family_completion_scopes_to_every_returned_row(self):
+        """صفحةٌ مكتملةُ العائلات: النطاق = صفوف الاستجابة ومنها الأخ الواقع
+        خارج الصفحة — وإلا رجع الصفّ المجمَّع بلا رقم — ولا يدخل غريبٌ لا يُعرَض.
+        """
+        sup = Partner.objects.create(
+            tenant=self.t_a, name="مورد العائلة", partner_type="Supplier")
+        family = ProductFamily.objects.create(tenant=self.t_a, name_ar="عائلة النطاق")
+        # ترتيب الإنشاء يحكم `-id`: الغريب أقدمُ فلا يقع في الصفحة الأولى.
+        stranger = Product.objects.create(
+            tenant=self.t_a, sku="PG-X", name_ar="غريب عن الصفحة", avg_cost=Decimal("0"))
+        outside = Product.objects.create(
+            tenant=self.t_a, family=family, sku="PG-1", name_ar="خارج الصفحة",
+            avg_cost=Decimal("0"))
+        inside = Product.objects.create(
+            tenant=self.t_a, family=family, sku="PG-2", name_ar="داخل الصفحة",
+            avg_cost=Decimal("0"))
+        _posted_purchase(self.t_a, sup, outside, number="PG-OUT", date="2026-06-01", price=11)
+        _posted_purchase(self.t_a, sup, inside, number="PG-IN", date="2026-06-05", price=22)
+        _posted_purchase(self.t_a, sup, stranger, number="PG-X1", date="2026-06-09", price=99)
+        self._auth()
+
+        with patch("core.pricing.last_purchase_prices_base_currency",
+                   wraps=last_purchase_prices_base_currency) as spy:
+            res = self._get("?page=1&page_size=1&complete_families=1")
+
+        assert res.status_code == 200, res.content[:300]
+        rows = {
+            row["id"]: Decimal(row["last_purchase_price"] or "0")
+            for row in res.json()["results"]
+        }
+        # الصفحة = الأحدث (-id) والباقي إكمالُ عائلة؛ ولكل صفٍّ آخر سعرٍ لبرنده.
+        assert rows == {inside.id: Decimal("22.0000"), outside.id: Decimal("11.0000")}
+        assert [set(ids) for ids in self._scope_calls(spy)] == [{inside.id, outside.id}], \
+            self._scope_calls(spy)
+
+    def test_create_and_update_responses_scope_to_the_saved_product(self):
+        """ردُّ الإنشاء/التعديل صفٌّ واحد: نطاقُه منتجه لا الشركة كاملة."""
+        sup = Partner.objects.create(
+            tenant=self.t_a, name="مورد الكتابة", partner_type="Supplier")
+        other = Product.objects.create(
+            tenant=self.t_a, sku="WR-0", name_ar="منتج قائم", avg_cost=Decimal("0"))
+        _posted_purchase(self.t_a, sup, other, number="WR-1", date="2026-06-01", price=77)
+        self._auth()
+
+        with patch("core.pricing.last_purchase_prices_base_currency",
+                   wraps=last_purchase_prices_base_currency) as create_spy:
+            created = self._post({"name_ar": "منتج كتابة"})
+        assert created.status_code == 201, created.content[:300]
+        body = created.json()
+        assert body["last_purchase_price"] is None
+        assert self._scope_calls(create_spy) == [[body["id"]]], self._scope_calls(create_spy)
+
+        with patch("core.pricing.last_purchase_prices_base_currency",
+                   wraps=last_purchase_prices_base_currency) as update_spy:
+            updated = self.client.patch(
+                f"{PRODUCTS_URL}{body['id']}/", {"name_ar": "منتج كتابة معدّل"},
+                format="json", HTTP_X_TENANT_ID=self._tenant_id)
+        assert updated.status_code == 200, updated.content[:300]
+        assert updated.json()["last_purchase_price"] is None
+        assert self._scope_calls(update_spy) == [[body["id"]]], self._scope_calls(update_spy)
 
     def test_category_tree_query_count_is_constant(self):
         root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")

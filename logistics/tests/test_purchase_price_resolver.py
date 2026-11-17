@@ -13,8 +13,10 @@ from rest_framework.test import APITestCase
 from core.pricing import (
     INDICATIVE_PRICE_INVOICE_WINDOW,
     INDICATIVE_PRICE_LABEL,
+    LAST_PURCHASE_PRICE_LABEL,
     PriceStrategy,
     indicative_purchase_prices,
+    last_purchase_prices_base_currency,
     purchase_price_list,
     resolve_purchase_price,
 )
@@ -494,3 +496,138 @@ def test_indicative_price_bulk_computation_is_single_query(env, django_assert_nu
 
     with django_assert_num_queries(1):
         indicative_purchase_prices(tenant_id=tenant.TenantID)
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# «آخر سعر شراء» للقائمة/الكرت — قراءةٌ دفعية واحدة، لا avg_cost، ولا نافذة
+# ──────────────────────────────────────────────────────────────────────────
+def test_last_purchase_bulk_is_the_latest_posted_not_the_minimum(env):
+    """آخر سعر = **أحدث** فاتورة شراء مرحَّلة، لا الأقلّ ولا متوسطاً.
+
+    الأرقام الثلاثة متمايزة عمداً (٢٠ أقلّ، ١٠٠ وسط، ٤٠ آخر) كي يكشف الاختبار
+    أيّ توصيلٍ خاطئ: القيمة الأساسية للصفّ يجب أن تكون ٤٠ — وهي أيضاً ما تعرضه
+    «أقلّ شراء» كرقمٍ مختلف (٢٠) فيبقى الحقلان مستقلّين في الاختبار.
+    """
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=20)
+    _posted_pi(tenant, sup, ils, product, number="P-2", date="2026-06-15", price=100)
+    _posted_pi(tenant, sup, ils, product, number="P-3", date="2026-06-20", price=40)
+
+    result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    row = result[product.id]
+    assert Decimal(row["unit_price"]) == Decimal("40.0000")
+    assert row["document_number"] == "P-3"
+    assert row["document_date"] == "2026-06-20"
+    assert row["source_type"] == "PURCHASE_INVOICE"
+    assert row["source_label"] == LAST_PURCHASE_PRICE_LABEL == "آخر سعر شراء"
+    # «أقلّ شراء» رقمٌ آخر فعلاً — لا نسخةً من آخر سعر بلافتةٍ ثانية.
+    lowest = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    assert Decimal(lowest[product.id]["unit_price"]) == Decimal("20.0000")
+
+
+def test_last_purchase_bulk_ignores_drafts(env):
+    """المسوّدة الأحدث والأرخص لا تصير «آخر سعر شراء» — المرحَّل وحده يُقرأ."""
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="D-1", date="2026-06-25", price=5, posted=False)
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=40)
+
+    result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("40.0000")
+    assert result[product.id]["document_number"] == "P-1"
+
+
+def test_last_purchase_bulk_absent_without_history_not_avg_cost(env):
+    """بلا شراء مرحَّل: المفتاح **غائب** — لا سقوطٌ إلى `avg_cost`.
+
+    متوسط التكلفة ليس سعر شراء (وهو هنا ٩٩ لتُكشف أيّ سلسلة احتياطٍ تُدخله).
+    """
+    tenant, _ils, _usd, _sup, product = env
+    product.avg_cost = Decimal("99")
+    product.save(update_fields=["avg_cost"])
+
+    result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert product.id not in result
+
+
+def test_last_purchase_bulk_uses_document_rate_and_line_override(env):
+    """كل فاتورةٍ تُحوَّل بسعر صرف **سطرها** إن وُجد وإلا فاتورتها — لا رقمٍ خام."""
+    tenant, ils, usd, sup, product = env
+    # ١٠ دولار × ٣٫٦ = ٣٦ أساسياً (أقدم).
+    _posted_pi(tenant, sup, usd, product, number="USD-1", date="2026-06-01",
+               price=10, exchange_rate="3.6")
+    # ١٠ دولارات بسعر صرف سطرٍ ٤٫٠ = ٤٠ أساسياً (الأحدث) — السطر يسبق الفاتورة.
+    latest = _posted_pi(tenant, sup, usd, product, number="USD-2", date="2026-06-10",
+                        price=10, exchange_rate="3.6")
+    latest.items.update(line_exchange_rate=Decimal("4.0"))
+
+    result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("40.0000")
+    assert result[product.id]["document_number"] == "USD-2"
+    # ولا رقمٌ خام (١٠) ولا صرفُ اليوم — تحويلُ مستندٍ بعملته هو.
+    assert Decimal(result[product.id]["unit_price"]) != Decimal("10.0000")
+
+
+def test_last_purchase_bulk_equal_dates_break_by_invoice_id(env):
+    """تاريخان متساويان: حتميّةٌ بمعرّف الفاتورة الأعلى — كما يفعل المسترجع."""
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="P-OLD", date="2026-06-10", price=10)
+    newer = _posted_pi(tenant, sup, ils, product, number="P-NEW", date="2026-06-10", price=70)
+
+    result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("70.0000")
+    assert result[product.id]["document_id"] == newer.id
+    resolved = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE)
+    assert resolved["unit_price"] == result[product.id]["unit_price"]
+    assert resolved["source"]["document_id"] == newer.id
+
+
+def test_last_purchase_bulk_is_tenant_scoped(env):
+    """فاتورةٌ أحدث في شركةٍ أخرى لا تُسرَّب إلى هذه الشركة."""
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=40)
+    other_owner = User.objects.create_user(username="ppr2", password="x")
+    other_tenant = create_company("شركة تسعير أخرى", other_owner)
+    other_sup = Partner.objects.create(
+        tenant=other_tenant, name="مورد آخر", partner_type="Supplier")
+    _posted_pi(other_tenant, other_sup, ils, product, number="OTH-1",
+               date="2026-07-01", price=1)
+
+    result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("40.0000")
+    assert result[product.id]["document_number"] == "P-1"
+
+
+def test_last_purchase_bulk_honours_product_ids_filter(env):
+    """الطلب المقيَّد بمعرّفات صفحةٍ لا يحسب بقية الكتالوج."""
+    tenant, ils, _usd, sup, product = env
+    other = Product.objects.create(
+        tenant=tenant, sku="PPR-9", name_ar="منتج آخر", avg_cost=Decimal("0"))
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=40)
+    _posted_pi(tenant, sup, ils, other, number="P-2", date="2026-06-01", price=90)
+
+    result = last_purchase_prices_base_currency(
+        tenant_id=tenant.TenantID, product_ids=[product.id])
+    assert set(result) == {product.id}
+
+
+def test_last_purchase_bulk_query_count_is_bounded(
+        env, django_assert_max_num_queries):
+    """استعلامان ثابتان مهما بلغ عدد المنتجات: مسحُ البنود + خريطة حصص الدولية.
+
+    لا استعلامَ لكل صفّ، ولا استعلامٌ مترابط لكل منتج — نفس درس
+    `correlated-subquery-on-lists` الذي يمنع ربطَ صفٍّ باستعلامٍ خاصّ به.
+    """
+    tenant, ils, _usd, sup, product = env
+    products = [product]
+    for i in range(6):
+        products.append(Product.objects.create(
+            tenant=tenant, sku=f"PPRQ-{i}", name_ar=f"منتج {i}", avg_cost=Decimal("0")))
+    for i, p in enumerate(products):
+        _posted_pi(tenant, sup, ils, p, number=f"Q-{i}", date=f"2026-06-0{i + 1}",
+                   price=10 + i)
+
+    with django_assert_max_num_queries(2):
+        result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert len(result) == len(products)
