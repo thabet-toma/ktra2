@@ -1965,6 +1965,14 @@ class StockMovementViewSet(viewsets.ModelViewSet):
         if movement_type not in dict(StockMovement.MOVEMENT_TYPES):
             return Response({'error': 'نوع الحركة غير صالح'}, status=status.HTTP_400_BAD_REQUEST)
 
+        raw_reference_type = data.get('reference_type')
+        reference_type = 'MANUAL' if raw_reference_type in (None, '') else raw_reference_type
+        if reference_type not in StockMovement.MANUAL_REFERENCE_TYPES:
+            return Response(
+                {'error': 'نوع المرجع غير مسموح في الحركة اليدوية'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         try:
             qty = Decimal(str(data.get('quantity', 0)))
             cost = Decimal(str(data.get('unit_cost', 0)))
@@ -1986,7 +1994,7 @@ class StockMovementViewSet(viewsets.ModelViewSet):
                 movement_type=movement_type,
                 quantity=qty,
                 unit_cost=cost,
-                reference_type=data.get('reference_type', 'MANUAL'),
+                reference_type=reference_type,
                 reference_id=data.get('reference_id'),
                 partner=partner,
                 movement_date=movement_date,

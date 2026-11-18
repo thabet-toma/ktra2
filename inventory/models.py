@@ -535,6 +535,8 @@ class StockMovement(models.Model):
     # تقسيم المخزن: مصدر البضاعة محلي (فاتورة شراء عادية) أو دولي (مسار الاستيراد).
     IMPORT_REFERENCE_TYPES = ('SHIPMENT', 'DEAL', 'CLEARANCE')
     LOCAL_REFERENCE_TYPES = ('PURCHASE_INVOICE', 'GOODS_RECEIPT')
+    # نقطة الحركة اليدوية لا يجوز أن تزوّر مراجع المستندات المملوكة للنظام.
+    MANUAL_REFERENCE_TYPES = ('MANUAL',)
 
     class Meta:
         db_table = 'stock_movements'

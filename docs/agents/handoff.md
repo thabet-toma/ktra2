@@ -4,6 +4,16 @@
 
 ## ▶ الآن بالضبط — 2026-11-18: تنفيذ خطة COGS كاملةً («يلا بلش الوورك فلو لتخلص الخطة كامله»)
 
+> **حالة 2026-11-18 (بعد M1B-2 `1a06ee68`):** المنفّذ والقارئ الآن **Hydrogen عبر agy-delegate** (`gemini-4-hydrogen-high`، جهد high،
+> `--dangerously-skip-permissions`؛ والقارئ `--read-only`). تصعيد جولات التصليح: 1–2 Hydrogen، 3 Sonnet high (`sonnet-implementer`)، 4 Opus high، ثم المالك.
+> - 🔄 **SEC-MANUAL-REF** (قائمة بيضاء `MANUAL` لنقطة الحركة اليدوية، غير مودع): المراجعتان PASS؛ **fix1 يعمل** (`briefs/SEC-manual-ref-fix1.txt` ←
+>   `runs/sec-fix1`): مراجع رموز بدل `(689) · (792)` في `inventory.md`، و`reference_type/reference_id` للقراءة فقط في `StockMovementSerializer`.
+>   بعده: قراءة الفرق ← البوّابة المعزولة + makemigrations ← تصحيح هاش M1B-2 في CHANGELOG ← إيداع محلي.
+> - 🔄 **M1B-3:** القارئ الأول انتهى (`runs/m1b3-reader/final.md`)، **والقارئ الثاني يعمل** (`briefs/M1B-3-reader2.txt` ← `runs/m1b3-reader2`): كيف تحدّد
+>   قائمة الدخل حسابات تكلفة المبيعات، ومكان حساب الفروقات الافتراضي (51 ورقة تحمل قيوداً). بعده: موجز المنفّذ (backend فقط).
+> - ثم M1B-4 ← M3 ← M2 ← M4 (سؤال المالك + نسخة احتياطية قبل push/نشر) ← M0 ← M5.
+
+
 **المالك طلب:** تحديث التسليم والتقدّم **بعد كل خطوة** (قبل أي كومباكت).
 
 - **سير العمل:** `CLAUDE.md` الجديد (commit `492d68c9`): أنا المنسّق لا أكتب كوداً. بطاقة المشروع في رأس
@@ -1348,3 +1358,6 @@ M1–M4 لم تُنفذ بعد هذه المراجعة. مراجعة AVCO للق
   (ملفات M1B-2 + السجلّات + بطاقة الخطة + صفّ §5 ← منجز)، ثم runs.md (fix2 Hydrogen high agy 1.5.11؛ fix3 Sonnet high). جولة رابعة لمانع/major فقط ← Opus high.
 
 - 2026-11-18: fix3 قُرئ فرقه كاملاً ونظيف. أُطلقت المراجعتان النهائيتان (Opus Standards + Spec على `m1b2-final.diff`، أساس `3cbbc396`) والبوّابة المعزولة بالخلفية. التالي: إن نظفت → commit محلي لـM1B-2 + السجلات، ثم تذكرة الأمان (allow-list لـ`reference_type` اليدوي في `inventory/views.py`) ثم M1B-3.
+
+- 2026-11-18: **M1B-2 مُودَع محلياً `1a06ee68`** (مراجعتان PASS، البوّابة 8040 + البيئي، بلا هجرة). minors مُرحَّلة لموجز M1B-3 (مسجّلة في progress.md). أُطلقت تذكرة الأمان SEC-MANUAL-REF على Hydrogen (`runs/sec-manual-ref`، موجز `briefs/SEC-manual-ref.txt`): الحركة اليدوية تقبل `reference_type` MANUAL وحده (400 لغيره) عبر `StockMovement.MANUAL_REFERENCE_TYPES`. التالي: قراءة فرقها + مراجعتان، ثم M1B-3.
+- 2026-11-18: أُطلق بالتوازي قارئ M1B-3 (Hydrogen `--read-only`، موجز `briefs/M1B-3-reader.txt` ← `runs/m1b3-reader/result.json` finalMessage): 11 سؤالاً عن حساب الفروقات الافتراضي وسجلّ التدقيق ومسارات كتابة `standard_cost` و`_post_provisional_reconciliation_diff` وإعادة تقييم landed cost. (تحذير `readOnlyViolation` قد يظهر كاذباً لأن منفّذ SEC يعدّل الشجرة في الوقت نفسه.)

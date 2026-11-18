@@ -14,7 +14,8 @@ from rest_framework.test import APITestCase
 
 from core.models import ActivityLog
 from core.pricing import last_purchase_prices_base_currency
-from inventory.models import Product, ProductCategory, ProductFamily, StockMovement, UnitOfMeasure
+from inventory.models import Product, ProductCategory, ProductFamily, StockLayer, StockMovement, UnitOfMeasure
+from inventory.serializers import StockMovementSerializer
 from inventory.services import add_brand_to_family, create_product_with_family
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
 from partners.models import Partner
@@ -634,6 +635,156 @@ class ProductApiTest(APITestCase):
         foreign.refresh_from_db()
         assert foreign.quantity_on_hand == 7
         assert not StockMovement.objects.filter(product=foreign).exists()
+
+    def test_stock_movement_create_rejects_forged_sale_reference(self):
+        prod = Product.objects.create(
+            tenant=self.t_a,
+            sku="MANUAL-OUT-1",
+            name_ar="منتج صرف",
+            quantity_on_hand=Decimal("10"),
+            avg_cost=Decimal("5"),
+        )
+        self._auth()
+
+        res = self.client.post(
+            "/api/inventory/stock-movements/",
+            {
+                "product": prod.id,
+                "movement_type": "OUT",
+                "quantity": "2",
+                "unit_cost": "5",
+                "reference_type": "SALE",
+                "reference_id": 123,
+            },
+            format="json",
+            HTTP_X_TENANT_ID=self._tenant_id,
+        )
+
+        assert res.status_code == 400, res.content[:300]
+        assert res.json() == {"error": "نوع المرجع غير مسموح في الحركة اليدوية"}
+        assert StockMovement.objects.filter(tenant=self.t_a, product=prod).count() == 0
+        prod.refresh_from_db()
+        assert prod.quantity_on_hand == Decimal("10")
+
+    def test_stock_movement_create_rejects_forged_purchase_reference(self):
+        prod = Product.objects.create(
+            tenant=self.t_a,
+            sku="MANUAL-IN-1",
+            name_ar="منتج وارد",
+            quantity_on_hand=Decimal("0"),
+            avg_cost=Decimal("0"),
+        )
+        self._auth()
+
+        res = self.client.post(
+            "/api/inventory/stock-movements/",
+            {
+                "product": prod.id,
+                "movement_type": "IN",
+                "quantity": "5",
+                "unit_cost": "10",
+                "reference_type": "PURCHASE_INVOICE",
+            },
+            format="json",
+            HTTP_X_TENANT_ID=self._tenant_id,
+        )
+
+        assert res.status_code == 400, res.content[:300]
+        assert res.json() == {"error": "نوع المرجع غير مسموح في الحركة اليدوية"}
+        assert StockMovement.objects.filter(tenant=self.t_a, product=prod).count() == 0
+        assert StockLayer.objects.filter(tenant=self.t_a, product=prod).count() == 0
+
+    def test_stock_movement_create_defaults_missing_reference_type_to_manual(self):
+        prod = Product.objects.create(
+            tenant=self.t_a,
+            sku="MANUAL-DEF-1",
+            name_ar="منتج افتراضي",
+        )
+        self._auth()
+
+        res = self.client.post(
+            "/api/inventory/stock-movements/",
+            {
+                "product": prod.id,
+                "movement_type": "IN",
+                "quantity": "3",
+                "unit_cost": "4",
+            },
+            format="json",
+            HTTP_X_TENANT_ID=self._tenant_id,
+        )
+
+        assert res.status_code == 201, res.content[:300]
+        assert StockMovement.objects.get(pk=res.json()["id"]).reference_type == "MANUAL"
+
+    def test_stock_movement_create_allows_explicit_manual_reference(self):
+        prod = Product.objects.create(
+            tenant=self.t_a,
+            sku="MANUAL-EXP-1",
+            name_ar="منتج يدوي",
+        )
+        self._auth()
+
+        res = self.client.post(
+            "/api/inventory/stock-movements/",
+            {
+                "product": prod.id,
+                "movement_type": "IN",
+                "quantity": "3",
+                "unit_cost": "4",
+                "reference_type": "MANUAL",
+            },
+            format="json",
+            HTTP_X_TENANT_ID=self._tenant_id,
+        )
+
+        assert res.status_code == 201, res.content[:300]
+        assert StockMovement.objects.get(pk=res.json()["id"]).reference_type == "MANUAL"
+
+    def test_stock_movement_create_normalizes_null_and_empty_reference_type_to_manual(self):
+        prod = Product.objects.create(
+            tenant=self.t_a,
+            sku="MANUAL-NULL-1",
+            name_ar="منتج فارغ المرجع",
+        )
+        self._auth()
+
+        for raw_ref in (None, ""):
+            res = self.client.post(
+                "/api/inventory/stock-movements/",
+                {
+                    "product": prod.id,
+                    "movement_type": "IN",
+                    "quantity": "1",
+                    "unit_cost": "2",
+                    "reference_type": raw_ref,
+                },
+                format="json",
+                HTTP_X_TENANT_ID=self._tenant_id,
+            )
+            assert res.status_code == 201, res.content[:300]
+            assert StockMovement.objects.get(pk=res.json()["id"]).reference_type == "MANUAL"
+
+    def test_stock_movement_serializer_treats_reference_fields_as_read_only(self):
+        prod = Product.objects.create(
+            tenant=self.t_a,
+            sku="SER-RO-1",
+            name_ar="منتج سيريالايزر",
+        )
+        serializer = StockMovementSerializer(
+            data={
+                "product": prod.id,
+                "movement_type": "IN",
+                "quantity": "5",
+                "unit_cost": "4",
+                "movement_date": "2026-11-18",
+                "reference_type": "SALE",
+                "reference_id": 123,
+            }
+        )
+        assert serializer.is_valid(), serializer.errors
+        assert "reference_type" not in serializer.validated_data
+        assert "reference_id" not in serializer.validated_data
 
     # ── جدول المنتجات: فلتر حالة المخزون + ترتيب حسب الكمية/الحد الأدنى ──
     def _seed_stock_mix(self):

@@ -779,7 +779,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
             'avg_cost_before', 'avg_cost_after',
         ]
         read_only_fields = [
-            'id', 'total_cost', 'created_at',
+            'id', 'total_cost', 'reference_type', 'reference_id', 'created_at',
             'quantity_before', 'quantity_after',
             'avg_cost_before', 'avg_cost_after',
         ]
