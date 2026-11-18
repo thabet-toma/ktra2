@@ -22,6 +22,9 @@ from accounting.services import (
     validate_fiscal_period,
     validate_journal_entry,
 )
+# حركات المخزون المنسوبة لفاتورة بيع (`SALE` وإذن الصرف `STOCK_ISSUE`؛ قيد التسليم
+# `SALES_DELIVERY_COGS` قيدٌ لا حركة): التعريف المشترك في `inventory/cogs_method.py` (`SALE_ISSUE_REFERENCE_TYPES`).
+from inventory.cogs_method import SALE_ISSUE_REFERENCE_TYPES as SALES_STOCK_REFERENCE_TYPES
 from inventory.models import Product, StockMovement
 from inventory.serials import (
     consume_sales_serials,
@@ -47,13 +50,6 @@ from sales.models import (
 logger = logging.getLogger("sales.services")
 
 DEC = Decimal("0.01")
-
-# حركات المخزون التي تُنسب إلى فاتورة بيع: الخصم عند الترحيل (`SALE`) وإذن
-# الصرف الصريح (`STOCK_ISSUE`). حركة التسليم نفسها `SALE` (قيد
-# `SALES_DELIVERY_COGS` قيدٌ لا حركة). ثابتٌ واحد لأن قاعدةَ الانتساب هذه
-# يقرأها مستهلكان: خريطة تكلفة المبيع، وتبويب أثر الفاتورة على المخزون —
-# ونسختان منها تنحرفان بصمت حين يُضاف نوعٌ ثالث.
-SALES_STOCK_REFERENCE_TYPES = ("SALE", "STOCK_ISSUE")
 
 
 def sales_cogs_map(

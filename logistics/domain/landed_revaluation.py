@@ -27,6 +27,8 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
 
+from inventory.cogs_method import sync_fifo_snapshot
+
 logger = logging.getLogger(__name__)
 
 REVALUATION_REFERENCE_TYPE = 'PURCHASE_INVOICE_LANDED_ADJ'
@@ -168,7 +170,10 @@ def _walk_layer(layer, unit_delta: Decimal, *, apply: bool, depth: int = 0) -> t
                 qty = D(str(movement.quantity or 0))
                 movement.total_cost = total
                 movement.unit_cost = (total / qty).quantize(D('0.0001')) if qty > 0 else D('0')
-                movement.save(update_fields=['total_cost', 'unit_cost'])
+                fields = ['total_cost', 'unit_cost']
+                if sync_fifo_snapshot(movement):
+                    fields.append('cogs_cost')
+                movement.save(update_fields=fields)
         if apply:
             cons.unit_cost = (D(str(cons.unit_cost)) + unit_delta).quantize(D('0.0001'))
             cons.save(update_fields=['unit_cost'])

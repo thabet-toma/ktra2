@@ -12,8 +12,9 @@ from core.user_roles import user_display_name
 # تُعرَّف هنا مرّةً واحدة لأن `sales` يستورد `inventory.models` أصلاً، والعكس
 # (inventory ← sales) ممنوع. `StockMovement.cogs_method` و
 # `SalesSettings.cogs_cost_method` يقرآن القائمةَ نفسها فلا تفترق نسختان.
-# حالياً يكتب مرتجع البيع اللقطةَ لأصول الطرق الثابتة وحدها؛ حركات البيع
-# تكتبها في M1B-2، ولا اختيارٌ فعّالٌ في الـAPI بعد.
+# صرف البيع (OUT بمرجع SALE/STOCK_ISSUE) يكتب اللقطةَ عند الترحيل عبر
+# `inventory/cogs_method.py` (`apply_sale_cogs_snapshot`) بطريقة `SalesSettings.cogs_cost_method`،
+# والمرتجع ينسخها من أصله؛ ولا API ولا واجهة لاختيار الطريقة بعد (M1B-3).
 COGS_METHOD_FIFO = 'fifo'
 COGS_METHOD_AVCO = 'avco'
 COGS_METHOD_STANDARD = 'standard'
@@ -272,9 +273,8 @@ class Product(models.Model):
         max_digits=18, decimal_places=4, default=0, db_column='AvgCost',
         help_text='Weighted average cost per unit (base currency)',
     )
-    # M1A-COGS: التكلفة المعيارية للوحدة. `NULL` = «لم تُحدَّد» وليست صفراً؛
-    # والصفرُ كلفةٌ صريحةٌ صالحة (منتجٌ مجّانيّ أو بندٌ بلا كلفة). لا قارئَ
-    # لهذا العمود بعد — محرّك الطريقة وفروقاتُها في M1B.
+    # M1A-COGS: التكلفة المعيارية للوحدة. `NULL` = «لم تُحدَّد» وليست صفراً، والصفرُ كلفةٌ صريحةٌ صالحة؛
+    # يقرؤها `inventory/cogs_method.py` (`method_unit_cost`) في طريقة `standard`، و`NULL` يسقط إلى `fifo` مع تحذير.
     standard_cost = models.DecimalField(
         max_digits=18, decimal_places=4, null=True, blank=True,
         db_column='StandardCost',
@@ -505,7 +505,8 @@ class StockMovement(models.Model):
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
     unit_cost = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='UnitCost')
     total_cost = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='TotalCost')
-    # يكتب المرتجع اللقطة عند وجود لقطة طريقة ثابتة في أصلٍ؛ مسارا القيد
+    # يكتب اللقطةَ صرفُ البيع (OUT بمرجع SALE/STOCK_ISSUE) عند الترحيل، والمرتجعُ
+    # عند وجود لقطة طريقة ثابتة في أصلٍ؛ مسارا القيد
     # وsales_cogs_map يستخدمون
     # cogs_cost إن وُجدت وإلا total_cost، والصفر قيمة صريحة. تكلفة موجودة
     # مع طريقة NULL تعني مرتجعاً خلط أصولاً بطرق مختلفة؛ لا تعبئة للحركات القائمة.

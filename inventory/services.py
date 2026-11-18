@@ -9,9 +9,10 @@ import logging
 import re
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import IntegrityError, transaction
-from django.db.models import Q, Sum
+from django.db.models import OuterRef, Q, Subquery, Sum
 from django.core.exceptions import ValidationError
 
+from .cogs_method import apply_sale_cogs_snapshot, is_sale_issue, sync_fifo_snapshot
 from .models import (
     COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD,
     Product, ProductFamily, ProductMerge, ProductStorageLocation, StockLayer,
@@ -875,8 +876,15 @@ def record_stock_movement(
     if movement_type not in valid_types:
         raise ValidationError(f"نوع الحركة غير صالح: {movement_type}")
 
+    sale_issue = is_sale_issue(movement_type, reference_type)
     with transaction.atomic():
-        prod = Product.objects.select_for_update().get(pk=product.pk)
+        products = Product.objects.select_for_update()
+        if sale_issue:
+            from sales.models import SalesSettings
+            products = products.annotate(_sale_cogs_method=Subquery(
+                SalesSettings.objects.filter(tenant_id=OuterRef('tenant_id')).values('cogs_cost_method')[:1]
+            ))
+        prod = products.get(pk=product.pk)
 
         qty_before = Decimal(str(prod.quantity_on_hand))
         avg_before = Decimal(str(prod.avg_cost))
@@ -1066,6 +1074,8 @@ def record_stock_movement(
         movement.unit_cost = unit_cost
         movement.total_cost = total_cost
         movement.avg_cost_after = new_avg.quantize(Decimal('0.0001'))
+        if sale_issue:
+            apply_sale_cogs_snapshot(movement, method=prod._sale_cogs_method)
         update_fields = ['unit_cost', 'total_cost', 'avg_cost_after']
         if movement.cogs_cost is not None:
             update_fields += ['cogs_cost', 'cogs_method']
@@ -2471,7 +2481,10 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
             m.unit_cost = avg
             m.total_cost = (q * avg).quantize(Decimal('0.01'))
             m.avg_cost_after = avg
-            m.save(update_fields=['unit_cost', 'total_cost', 'avg_cost_after'])
+            fields = ['unit_cost', 'total_cost', 'avg_cost_after']
+            if sync_fifo_snapshot(m):
+                fields.append('cogs_cost')
+            m.save(update_fields=fields)
         p.avg_cost = avg
         p.save(update_fields=['avg_cost'])
         journal = None

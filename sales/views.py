@@ -307,6 +307,8 @@ class SalesInvoiceViewSet(
         instance = serializer.instance
         headers = self.get_success_headers(serializer.data)
         data = serializer.data
+        if getattr(instance, "_cogs_warnings", None):
+            data["cogs_warnings"] = instance._cogs_warnings
         if hasattr(instance, "_auto_post_error") and instance._auto_post_error:
             data["auto_post_error"] = instance._auto_post_error
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
@@ -712,6 +714,8 @@ class SalesInvoiceViewSet(
         refund_summary = getattr(invoice, "_refund_summary", None)
         if refund_summary is not None:
             data["refund_summary"] = refund_summary
+        if getattr(invoice, "_cogs_warnings", None):
+            data["cogs_warnings"] = invoice._cogs_warnings
         if approval_warning:
             data["customer_approval_warning"] = approval_warning
         return Response(data)
@@ -770,10 +774,10 @@ class SalesInvoiceViewSet(
             request=request,
         )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
-        return Response({
-            **ser.data,
-            "payment_id": payment.pk if payment is not None else None,
-        })
+        data = {**ser.data, "payment_id": payment.pk if payment is not None else None}
+        if getattr(invoice, "_cogs_warnings", None):
+            data["cogs_warnings"] = invoice._cogs_warnings
+        return Response(data)
 
     @action(detail=True, methods=["post"], url_path="payment-voucher")
     @requires_perm("sales.payment.create")
@@ -830,7 +834,10 @@ class SalesInvoiceViewSet(
             request=request,
         )
         ser = SalesInvoiceSerializer(invoice, context={"request": request})
-        return Response(ser.data)
+        data = dict(ser.data)
+        if getattr(invoice, "_cogs_warnings", None):
+            data["cogs_warnings"] = invoice._cogs_warnings
+        return Response(data)
 
     @action(detail=False, methods=["get"], url_path="credit-preview")
     def credit_preview(self, request):
@@ -1230,6 +1237,7 @@ class SalesInvoiceViewSet(
                 {"error": "حدث خطأ غير متوقع أثناء التسليم."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+        cogs_warnings = getattr(invoice, "_cogs_warnings", None)
         invoice.refresh_from_db()
         log_activity(
             action="deliver", entity_type="sales_invoice", entity_id=invoice.id,
@@ -1237,12 +1245,15 @@ class SalesInvoiceViewSet(
             partner_ids=[invoice.customer_id],
             request=request,
         )
-        return Response({
+        data = {
             "delivery_id": delivery.id,
             "delivery_status": invoice.delivery_status,
             "delivery_status_display": invoice.get_delivery_status_display(),
             "lines_delivered": delivery.lines.count(),
-        })
+        }
+        if cogs_warnings:
+            data["cogs_warnings"] = cogs_warnings
+        return Response(data)
 
 
 class DeliveryOrderViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
@@ -1401,8 +1412,11 @@ class DeliveryOrderViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
                 [partner.id] if partner else []),
             request=request,
         )
+        data = DeliveryOrderSerializer(delivery).data
+        if invoice is not None and getattr(invoice, "_cogs_warnings", None):
+            data["cogs_warnings"] = invoice._cogs_warnings
         return Response(
-            DeliveryOrderSerializer(delivery).data,
+            data,
             status=status.HTTP_200_OK if existing is not None else status.HTTP_201_CREATED,
         )
 
@@ -1514,7 +1528,10 @@ class DeliveryOrderViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
                 [d.partner_id] if d.partner_id else []),
             request=request,
         )
-        return Response(DeliveryOrderSerializer(d).data)
+        data = DeliveryOrderSerializer(d).data
+        if d.invoice_id and getattr(d.invoice, "_cogs_warnings", None):
+            data["cogs_warnings"] = d.invoice._cogs_warnings
+        return Response(data)
 
 
 class CustomerPaymentViewSet(OptimisticConcurrencyMixin, PostedTextEditMixin, viewsets.ModelViewSet):

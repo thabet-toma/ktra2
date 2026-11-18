@@ -22,7 +22,9 @@ from accounting.services import (
     validate_fiscal_period,
     validate_journal_entry,
 )
-from inventory.models import Product, StockMovement
+from inventory.cogs_method import is_sale_issue
+from inventory.models import (Product, StockMovement, COGS_METHOD_FIFO,
+                              COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE)
 from inventory.serials import (
     assert_sales_return_serials_declared,
     assert_sales_serials_declared,
@@ -30,7 +32,7 @@ from inventory.serials import (
     release_sales_serials,
     restore_returned_sales_serials,
 )
-from inventory.services import record_stock_movement
+from inventory.services import product_display_name, record_stock_movement
 from partners.models import Partner, PartnerGroup
 from accounting.api import ensure_partner_account
 from core.active_guard import assert_active_for_posting
@@ -63,6 +65,23 @@ from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_prod
 
 #: ملاحظة فاتورة البيع في آخر وصف قيدها: «… — العميل · الملاحظة».
 INVOICE_NOTES_MARK = "· "
+
+
+def _cogs_warnings(invoice, movements):
+    settings = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
+    method = settings.cogs_cost_method if settings else None
+    reasons = {COGS_METHOD_STANDARD: 'no_standard_cost', COGS_METHOD_LAST_PURCHASE: 'no_prior_purchase'}
+    if method not in reasons:
+        return []
+    warnings = []
+    seen = set()
+    for mv in movements:
+        if (is_sale_issue(mv.movement_type, mv.reference_type)
+                and mv.cogs_method == COGS_METHOD_FIFO and mv.product_id not in seen):
+            seen.add(mv.product_id)
+            warnings.append({'product_id': mv.product_id, 'product_name': product_display_name(mv.product),
+                             'method': method, 'reason': reasons[method]})
+    return warnings
 
 
 def customer_payment_note_text(payment, notes: str | None = None) -> str:
@@ -1939,6 +1958,8 @@ def post_sales_invoice(
                     invoice, user=user, refund_choice=refund_choice
                 )
 
+    invoice._cogs_warnings = _cogs_warnings(invoice, stock_movements)
+    caller_invoice._cogs_warnings = invoice._cogs_warnings
     if hasattr(invoice, "_refund_summary"):
         caller_invoice._refund_summary = invoice._refund_summary
     return invoice
@@ -2224,7 +2245,9 @@ def _post_stock_out_for_invoice(
     كلفتها فبنى قيداً بلا كلفة.
     """
     existing = list(
-        StockMovement.objects.filter(reference_type="SALE", reference_id=invoice.id)
+        StockMovement.objects.filter(
+            tenant_id=invoice.tenant_id, reference_type="SALE", reference_id=invoice.id,
+        ).select_related("product")
     )
     if existing:
         return existing
@@ -2494,6 +2517,7 @@ def deliver_invoice_lines(
 
         costs_by_product: dict[int, Decimal] = defaultdict(Decimal)
         cogs_by_product: dict[int, Decimal] = defaultdict(Decimal)
+        stock_movements = []
         for line_id, qty in delivered_now.items():
             line = lines_by_id[line_id]
             warehouse = warehouse_by_line.get(line_id)
@@ -2516,6 +2540,7 @@ def deliver_invoice_lines(
                 )
             except ValidationError as e:
                 raise ValidationError(f"مخزون المنتج {line.product.sku}: {e}")
+            stock_movements.append(movement)
             # FIFO-137: الكلفة الفعليّة لهذا التسليم من حركته نفسها — لا من
             # `product.avg_cost` الذي حدّثته الحركة للتوّ (رقمٌ مشتقٌّ للعرض،
             # قد يستقرّ على صفر إن استُهلكت كل الطبقات المفتوحة).
@@ -2585,6 +2610,7 @@ def deliver_invoice_lines(
             ),
         )
 
+    invoice._cogs_warnings = _cogs_warnings(invoice, stock_movements)
     logger.info(
         "Sales invoice #%s delivery #%s: %d line(s), delivery_status=%s",
         invoice.id, delivery.id, len(delivered_now), invoice.delivery_status,

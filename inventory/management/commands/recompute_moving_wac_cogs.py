@@ -26,6 +26,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
+from inventory.cogs_method import sync_fifo_snapshot
+
 DEC = Decimal("0.01")
 Q4 = Decimal("0.0001")
 TENANT_NAME = 'الجرابعه'
@@ -153,8 +155,12 @@ class Command(BaseCommand):
         # ── التنفيذ ──
         with transaction.atomic():
             for mid, tc in changed_moves:
-                StockMovement.objects.filter(id=mid).update(total_cost=tc, unit_cost=(tc /
-                    Decimal(str(StockMovement.objects.get(id=mid).quantity or 1))).quantize(Q4))
+                movement = StockMovement.objects.get(id=mid, tenant_id=tid)
+                fields = {'total_cost': tc, 'unit_cost': (tc / Decimal(str(movement.quantity or 1))).quantize(Q4)}
+                movement.total_cost = tc
+                if sync_fifo_snapshot(movement):
+                    fields['cogs_cost'] = movement.cogs_cost
+                StockMovement.objects.filter(id=mid, tenant_id=tid).update(**fields)
             for pid, avg in product_final_avg.items():
                 Product.objects.filter(id=pid).update(avg_cost=avg)
             # قيد تسوية إجمالي لفرق ت.ب.م
