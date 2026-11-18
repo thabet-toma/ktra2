@@ -9,13 +9,13 @@ import logging
 import re
 from decimal import Decimal, ROUND_HALF_UP
 from django.db import IntegrityError, transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 from django.core.exceptions import ValidationError
 
 from .models import (
     COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD,
     Product, ProductFamily, ProductMerge, ProductStorageLocation, StockLayer,
-    StockLayerConsumption, StockMovement,
+    StockLayerConsumption, StockLayerRestoration, StockMovement,
 )
 from django.utils import timezone
 from . import fifo
@@ -972,7 +972,7 @@ def record_stock_movement(
             # ومواقعِها. والراجعُ الزائد عمّا استُهلك (مرتجعٌ أكبر من البيعة)
             # يسقط إلى المسار العاديّ أدناه بطبقةٍ جديدةٍ للفائض وحده.
             restored = (
-                fifo.restore_partial(movements=restore_sources, quantity=quantity)
+                fifo.restore_partial(movements=restore_sources, quantity=quantity, restored_by=movement)
                 if restore_sources else None
             )
             if restored is not None and restored.quantity > 0:
@@ -1261,8 +1261,99 @@ def _recompute_product_stock(product: Product, unrestored=None, unlayered_inboun
                 )
 
 
+def _undo_layer_restorations(*, tenant_id, movement_ids):
+    """اقفل المنتجات ثم استعادات المرتجع فاللاحقة ثم استهلاكات الأصل فالطبقات، واحرس الأثر واعكسه."""
+    if not movement_ids or not StockLayerRestoration.objects.filter(
+        tenant_id=tenant_id, movement_id__in=movement_ids,
+    ).exists():
+        return
+    product_ids = StockMovement.objects.filter(
+        tenant_id=tenant_id, pk__in=movement_ids,
+    ).values_list('product_id', flat=True)
+    products = {product.pk: product for product in Product.objects.select_for_update().filter(
+        tenant_id=tenant_id, pk__in=product_ids,
+    ).order_by('pk')}
+    restorations = list(StockLayerRestoration.objects.select_for_update().filter(
+        tenant_id=tenant_id, movement_id__in=movement_ids,
+    ).order_by('-id'))
+    if not restorations:
+        return
+    origin_ids = {row.origin_movement_id for row in restorations}
+    origin_keys = {row[0]: tuple(row[1:]) for row in StockMovement.objects.filter(
+        tenant_id=tenant_id, pk__in=origin_ids,
+    ).values_list('id', 'reference_type', 'reference_id', 'product_id')}
+    origin_scope = Q()
+    for reference_type, reference_id, product_id in set(origin_keys.values()):
+        origin_scope |= Q(origin_movement__reference_type=reference_type,
+                          origin_movement__reference_id=reference_id,
+                          origin_movement__product_id=product_id)
+    later = list(StockLayerRestoration.objects.select_for_update(of=('self',)).filter(
+        origin_scope, tenant_id=tenant_id,
+        movement__movement_type='RETURN_IN', movement_id__gt=min(movement_ids),
+    ).exclude(movement_id__in=movement_ids).values_list(
+        'origin_movement__reference_type', 'origin_movement__reference_id',
+        'origin_movement__product_id', 'movement_id',
+    ))
+    for row in restorations:
+        if any((reference_type, reference_id, product_id) == origin_keys[row.origin_movement_id]
+               and later_id > row.movement_id
+               for reference_type, reference_id, product_id, later_id in later):
+            product = products[origin_keys[row.origin_movement_id][2]]
+            label = product.name_ar or product.name_en or product.sku or f"#{product.pk}"
+            raise ValidationError(
+                f"لا يمكن إلغاء ترحيل هذا المرتجع للمنتج «{label}»: مرتجعٌ لاحق أعاد كمياتٍ من فاتورة البيع نفسها. ألغِ ترحيل المرتجع اللاحق أولاً."
+            )
+    layer_ids = {row.layer_id for row in restorations}
+    consumptions = {}
+    for consumption in StockLayerConsumption.objects.select_for_update().filter(
+        tenant_id=tenant_id, movement_id__in=origin_ids, layer_id__in=layer_ids,
+    ).order_by('-id'):
+        key = (consumption.movement_id, consumption.layer_id, consumption.unit_cost)
+        consumptions.setdefault(key, consumption)
+    layers = {layer.pk: layer for layer in StockLayer.objects.select_for_update(of=('self',)).filter(
+        tenant_id=tenant_id, pk__in=layer_ids,
+    ).select_related('product').order_by('id')}
+    totals = {}
+    for row in restorations:
+        totals[row.layer_id] = (totals.get(row.layer_id, Decimal('0')) + row.quantity).quantize(fifo.Q4)
+    for layer_id, quantity in totals.items():
+        layer = layers[layer_id]
+        if quantity > layer.remaining_qty:
+            product = layer.product
+            label = product.name_ar or product.name_en or product.sku or f"#{product.pk}"
+            raise ValidationError(
+                f"لا يمكن إلغاء ترحيل المرتجع للمنتج «{label}» لأن بضاعته استُهلكت في حركة لاحقة. ألغِ ترحيل تلك الحركة أولاً."
+            )
+    changed = {}
+    created = []
+    for row in restorations:
+        layer = layers[row.layer_id]
+        layer.remaining_qty = (layer.remaining_qty - row.quantity).quantize(fifo.Q4)
+        key = (row.origin_movement_id, row.layer_id, row.unit_cost)
+        consumption = consumptions.get(key)
+        if consumption:
+            consumption.quantity = (consumption.quantity + row.quantity).quantize(fifo.Q4)
+        else:
+            consumption = StockLayerConsumption(
+                tenant_id=tenant_id, movement_id=row.origin_movement_id,
+                layer=layer, quantity=row.quantity.quantize(fifo.Q4), unit_cost=row.unit_cost.quantize(fifo.Q4),
+            )
+            created.append(consumption)
+            consumptions[key] = consumption
+        if consumption.pk:
+            changed[key] = consumption
+    # ترتيب القائمة يحفظ ترتيب إنشاء صفوف الاستهلاك الأصلي.
+    StockLayerConsumption.objects.bulk_create(created)
+    StockLayerConsumption.objects.bulk_update(changed.values(), ['quantity'])
+    for layer in layers.values():
+        layer.save(update_fields=['remaining_qty'])
+
+
 def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
     """احذف حركات المخزون التي ولّدها مستند معيّن وأعد احتساب أرصدة منتجاته.
+
+    أولاً يُعكس أثر استعادة المرتجع بعد حارسَي المرتجع اللاحق ونقص الطبقة؛
+    المرتجع القديم بلا سجلات استعادة يبقى على سلوكه السابق.
 
     تُستخدم في «إلغاء الترحيل»/الحذف لإرجاع المخزون لما كان عليه قبل المستند.
     النطاق محصور تماماً بـ (tenant, reference_id, reference_type ∈ reference_types)
@@ -1299,6 +1390,7 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
     affected_products = {m.product_id: m.product for m in movements}
     count = len(movements)
     with transaction.atomic():
+        _undo_layer_restorations(tenant_id=tenant_id, movement_ids=movement_ids)
         # الرَّدّ: كل حركةٍ صادرة ضمن هذا المستند تعيد كميّتها إلى طبقاتها
         # الأصلية وموقعها في رتل FIFO — قبل الحذف لا بعده، وضمن نفس المعاملة
         # الذرّية كي لا يبقى ردٌّ جزئيٌّ بلا حذفٍ يتبعه عند أي عطل.

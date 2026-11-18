@@ -33,6 +33,9 @@
 | `ProductFamily` (task20) | `name_ar`, `name_en`, `min_stock_level`/`max_stock_level`, `is_serialized`, `is_service` | «المنتج» — الأب فوق `Product` (الشكل أ، #17). **بلا رقم إطلاقاً**: لا رصيد ولا تكلفة ولا FK من حركة؛ كل مجموعٍ يُشتقّ عند القراءة من `brands` (`Product.family` معكوساً). `category→ProductCategory`, `uom→UnitOfMeasure`، و6 FKs تجاوز حسابات على `accounting.Account` — نفس الأعمدة فيزيائياً موجودة أيضاً على `Product` (قاعدة التعايش، `inventory.services.resolve_family_field`) |
 | `StockMovement` | `movement_type` (IN/OUT/ADJUST_IN/ADJUST_OUT/RETURN_IN/RETURN_OUT), `quantity`, `unit_cost`, `total_cost`, `cogs_cost`/`cogs_method` (لقطة تكلفة المبيع وطريقتها؛ `NULL` في الاثنين تاريخية أو لم تُلتقط، والصفر قيمة صريحة؛ يكتبها المرتجع، واختلاط طرق الأصول يترك الطريقة `NULL` مع وجود التكلفة)، `reference_type`, `reference_id`, `quantity_before/after`, `avg_cost_before/after` | `product` (PROTECT)، `warehouse` (PROTECT)، `branch→tenants.Branch`، `partner→partners.Partner`؛ خاصيتا `origin` و`effective_cogs` (تقرأ `cogs_cost` إن وُجدت وإلا `total_cost`) |
 | `ProductCategory` | `name`, `parent` | `revenue_account`, `cogs_account`, `inventory_account` → `accounting.Account` |
+| `StockLayer` | كميات الطبقة وكلفة وحدتها | المنتج وحركة الورود |
+| `StockLayerConsumption` | كمية الاستهلاك ولقطة الكلفة | حركة الصرف والطبقة |
+| `StockLayerRestoration` | كمية الاستعادة ولقطة الكلفة | حركة المرتجع وحركة الأصل والطبقة |
 | `Warehouse` | `code`, `code_key` (مُولَّد), `is_default`, `is_active` | `branch→tenants.Branch` (اختياري)؛ فريد `(tenant, code_key)` **بلا شرط** — و`code_key` = `NULLIF(code,'')` فالرمزُ الفارغ يتكرّر كما ينبغي. كان القيدُ شرطيّاً وMySQL تتجاهله بصمت، أي أنّ رمزين متطابقين في شركةٍ واحدة كانا يُقبلان فعلاً. والرسالةُ العربيّةُ من `WarehouseViewSet` (`_reject_duplicate_code`) — **حارسٌ لم يكن موجوداً** |
 | `ProductSerial` | `serial`, `status` (`in_stock`/`sold`/`issued` — الأخيرة #223: صُرفت خارج مسار البيع) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`، `return_line→sales.SalesInvoiceLine` (بند مرجع البيع الذي أعادها — انظر «مرجع البيع لا يمحو أثر البيع»)، `issued_to→after_sales.ServiceOrderPart` (بند المستند الذي صرفها خارج البيع، #223 — مرجعٌ نصّي كنظيريه أعلاه، لا استيراد)؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف المنتج (`prodserial_tenant_serial`) |
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
@@ -816,6 +819,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
   عليه قيدٌ أو تقرير**. من قرأه ليحسب ت.ب.م أعاد عطبَ «الدفتر يقول رقماً والتقرير يقول
   غيره»: تحت المتوسّط كان الرقمان يتطابقان حكماً، وتحت FIFO يفترقان كلّما عبرت البيعةُ
   طبقتين بسعرين.
+- **أثر استعادة المرتجع**: `inventory/models.py` (`StockLayerRestoration`) يحفظ الطبقة والكمية ولقطة الكلفة وحركة الصرف الأصلية لكل جزء استُعيد عبر `inventory/fifo.py` (`restore_partial`). يعكس `inventory/services.py` (`reverse_stock_movements`) الأثر عند إلغاء الترحيل؛ حارس نقص الطبقة دفاع إضافي لأن `accounting/services.py` (`unpost_document`) يستدعي `find_stock_dependents` ويمنع المستهلك اللاحق أولاً. وحارس ترتيب المرتجعات يمنع إلغاء مرتجع قبل مرتجع لاحق استعاد للمنتج نفسه من مستند البيع الأصلي نفسه؛ ترتيب القفل: المنتجات ثم استعادات المرتجع فالاستعادات اللاحقة ثم استهلاكات الأصل فالطبقات. المرتجع التاريخي اللاحق بلا سجلات استعادة لا يمكن كشفه، والمرتجع القديم بلا سجلات يبقى على سلوك الإلغاء السابق.
 - **المرتجعُ يُفكّ بعكس ترتيب الاستهلاك** (`fifo.restore_partial`): بيعُ ٦٠ استهلك ٥٠ من
   طبقةِ العشرة وعشراً من طبقةِ الستّين؛ ومرتجعُ ١٥ يفكّ العشرَ الغالية أوّلاً ثمّ خمساً
   رخيصة — فتصير حالةُ الرتل **مطابقةً حرفاً بحرف** لما لو بيعت ٤٥ ابتداءً. الردُّ
@@ -1062,6 +1066,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
+| `sales/tests/test_sale_return_unpost_layers.py` | عكس استعادة المرتجع، الحارسان وترتيب المرتجعات، السلوك التاريخي وإعادة الترحيل |
 | `core/tests/test_reports_stock_dimension.py` | تقرير «حركة المخزون حسب بُعد»: المحاور الخمسة، والتنقيب الذي يطابق مجموعُه رقمَ الصفّ |
 | `core/tests/test_reports_family_rollup.py` (#26 + دلتا) | صفٌّ واحد للمنتج في أربعة تقارير، متوسط تكلفةٍ مرجَّح يفشل مع البسيط، مجموع التنقيب = رقم الصفّ، منتجٌ بلا أبٍ بلا تغيير، ثبات عدد الاستعلامات، عزل الشركات؛ ودلتا: عائلةٌ بحدٍّ منحرفٍ بين الإخوة (متاح العائلة كاملاً لا نصيب البرند المُنذِر، والتنقيب يسرد المتوفّر أيضاً)، وفلتر `product` يعيد صفّ براندٍ حقيقياً لا عائلةً منقوصة |
 | `inventory/tests/test_fifo_engine.py` | محرّك الطبقات: مثال المالك (٥٠ بـ١٠ ثمّ ٢٠ بـ٦٠)، عبورُ طبقتين، الردُّ الدقيق، حارسُ التآكل بعشر دورات، نفادُ الرتل بلا استثناء، عزلُ الشركات، واستعلامٌ واحد للقيمة |

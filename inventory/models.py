@@ -1156,6 +1156,44 @@ class StockLayerConsumption(models.Model):
         return f"Consumption {self.id}: layer={self.layer_id} qty={self.quantity}"
 
 
+class StockLayerRestoration(models.Model):
+    # يحفظ ما أعاده المرتجع لكل طبقة كي يُعكس بدقة عند إلغاء ترحيله.
+    id = models.AutoField(primary_key=True, db_column='StockLayerRestorationID')
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        db_column='TenantID',
+        related_name='stock_layer_restorations',
+    )
+    movement = models.ForeignKey(
+        StockMovement,
+        on_delete=models.CASCADE,
+        db_column='MovementID',
+        related_name='layer_restorations',
+    )
+    # حذف بيع الأصل والمرتجع قائم يمحو الأثر بـCASCADE فيعود المرتجع للسلوك القديم؛ متابعة لاحقة.
+    origin_movement = models.ForeignKey(
+        StockMovement,
+        on_delete=models.CASCADE,
+        db_column='OriginMovementID',
+        related_name='origin_layer_restorations',
+    )
+    layer = models.ForeignKey(
+        StockLayer,
+        on_delete=models.CASCADE,
+        db_column='StockLayerID',
+        related_name='restorations',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
+    unit_cost = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitCost')
+
+    class Meta:
+        db_table = 'stock_layer_restorations'
+        managed = True
+        ordering = ['id']
+        indexes = [models.Index(fields=['tenant', 'movement'], name='idx_slrest_tenant_movement')]
+
+
 class StockLayerReconciliation(models.Model):
     """سجلّ سدٍّ: أيُّ وارِدٍ سدّ أيَّ طبقةٍ مؤقّتة وكم — نظيرُ `StockLayerConsumption`.
 

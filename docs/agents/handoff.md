@@ -52,7 +52,40 @@
   فحص حساب الفروقات لكل منتج (الأصرم).
 - ▶ **التالي مباشرةً: M1B-R.** الموجز جاهز في `scratchpad/briefs/M1B-R.txt` (نموذج `StockLayerRestoration` وهجرة 0047، و`restore_partial(restored_by=)`،
   والعكس في `reverse_stock_movements` بحارس، والمرتجعات القديمة بلا أثر تبقى كاليوم، واختبارات a–g). الحقائق في `runs/R-M1B-R-facts/final.txt`.
-  يُرسل بتشغيل خلفي إلى `runs/M1B-R-r1`.
+  ✅ **M1B-R r1 انتهى** (8 دقائق، threadId `01a1ee3a-c1fe-7831-bd2a-16c81cb58c02`). أضاف `StockLayerRestoration` وهجرة `0047_stocklayerrestoration`،
+  و`restore_partial(restored_by=)`، و`_undo_layer_restorations` الذي يُستدعى أول `reverse_stock_movements`، والاختبارات في
+  `sales/tests/test_sale_return_unpost_layers.py` (a–g). النتائج: 35 passed مركّزة، و1293 passed للمبيعات، وmakemigrations بلا تغيير. قرأتُ الفرق،
+  وملاحظتي الوحيدة: النموذج غير مدرج في جدول النماذج في `inventory.md`. ✅ البوّابة المعزولة: 8006 passed + البيئي وحده.
+  ✅ **المراجعتان:** Standards ← major سباق (قراءة صفوف الاستعادة بلا قفل) وminors. Spec ← **FAIL** بـmajor: إلغاء مرتجعين بترتيب ترحيلهما
+  يقلب ترتيب صفوف الاستهلاك (5@10/3@16/2@20، R1=2 ثم R2=3، إلغاء R1 ثم R2 ← إعادة ترحيل R1 = 32 بدل 40). **القرار:** حارس LIFO (لا يُلغى
+  مرتجع وفوقه مرتجع لاحق أعاد من حركة الصرف نفسها)، وقفل الاستعادات أولاً بترتيب استعادات ← استهلاك ← طبقات، وجلب مسبق بلا استعلامات في الحلقة،
+  واختبار h للسيناريو. الحارس القديم لكل طبقة دفاعٌ إضافي فقط لأن `find_stock_dependents` يسبقه. **متابعة مقترحة للمالك لاحقاً:** منع إلغاء فاتورة
+  البيع الأصلية ومرتجعها قائم (CASCADE يمحو الأثر)، وهو عيب سابق.
+  ✅ **fix1 (من 3) انتهى** (13 دقيقة، threadId `01a1eeca-e770-7201-8e06-5cb2158b9393`): حارس LIFO، وقفل استعادات ← استهلاك ← طبقات، وجلب مسبق،
+  واختبارا h وi، وتشديد c/e/f، والوثائق. نتيجته: 37 passed مركّزة، و1295 passed لـsales+after_sales، وmakemigrations نظيف. قرأتُ الفرق كاملاً
+  (الكود والاختبار) فوجدته مطابقاً للموجز.
+  ✅ **بعد fix1:** البوّابة المعزولة 8008 passed + `PaperAmountsPayloadTest` البيئي، وmakemigrations نظيف. Standards ← لا blocker ولا major
+  (minors: قفل Product عبر select_related، و`later` قراءة بلا قفل). Spec ← **MAJOR تحقّقتُ منه بالتشغيل:** حارس LIFO يطابق `origin_movement_id`
+  وحده، وفاتورة بسطرين للمنتج نفسه تعطي حركتَي أصل فيُتجاوز (إعادة ترحيل R1 بـ32 بدل 40).
+  🔄 **الآن: fix2 (الجولة 2 من 3) يعمل** بموجز `scratchpad/briefs/M1B-R-fix2.txt` ← `runs/M1B-R-fix2`: نطاق الحارس = مستند الأصل + المنتج
+  (reference_type, reference_id, product_id)، وترتيب القفل products ← restorations ← consumptions ← layers، و`of=('self',)`، و`later` بقفل،
+  واختبار j (أحمر أولاً) وk، وإعادة تسمية i، واستيرادات h، ولفّ FKs، والوثائق.
+  ✅ **fix2 انتهى** (8 دقائق، threadId `01a1eee3-b66f-7c51-962c-4d42c02ec474`): j أحمر (`200 == 400`) ثم أخضر، وk أخضر قبل وبعد،
+  و1297 passed لـsales+after_sales، وmakemigrations نظيف. SALE+STOCK_ISSUE لفاتورة واحدة ممكن على مستوى الخدمة (`issue_stock_from_invoice`)
+  لكن لا مستدعي له، فلم يُوسَّع. قرأتُ الفرق كاملاً فوجدته مطابقاً. ملاحظة لي: `later` بـselect_for_update مع joins قد يقفل صفوف stock_movements.
+  مراجعة Standards بعد fix2: **FAIL بـMAJOR واحد مقبول**: `later` يُقفَل بعد الطبقات وبلا `of=('self',)` فيقفل صفوف stock_movements
+  المنضمّة ويقلب ترتيب الأقفال. وminor: الوثيقة لا تطابق الترتيب. وnit: label يُبنى لكل صفّ. ورفضتُ nit تسمية i لأنها قرار fix2.
+  البوّابة المعزولة بعد fix2: 8010 passed + البيئي وحده. موجز fix3 جاهز: `scratchpad/briefs/M1B-R-fix3.txt`.
+  مراجعة Spec بعد fix2: **PASS** (9 سيناريوهات إضافية خضراء)، وملاحظتها الوحيدة nit = نفس قفل `later` المشمول في fix3.
+  ✅ **fix3 انتهى** (6 دقائق، threadId `01a1eef5-21f9-7e30-9fa8-c682dddfdb2b`): `later` نُقل بعد الاستعادات بـ`of=('self',)`
+  والحارس قبل الاستهلاكات/الطبقات، وlabel عند الرفع فقط، والوثائق مطابقة. 39 + 1297 passed، makemigrations نظيف. قرأتُ الدالة كاملةً فوجدتها مطابقة.
+  Standards النهائية بعد fix3: **PASS** (بلا blocker/major). تُسجَّل ولا تُكرَّر (بعد الجولة 2):
+  minor1 قفل `later` يأخذ gap lock على مستوى الشركة فيؤخّر ترحيل مرتجعات أخرى حتى الإيداع (الترتيب مضمون أصلاً بقفل المنتج والفاتورة
+  `_lock_invoices_with_linked_originals`)؛ minor2 ترتيب قفل المنتجات بين الترحيل والإلغاء مختلف (deadlock 1213 ممكن ويُكتشف، موجود أصلاً
+  بين الترحيلات)؛ nits: CASCADE «متابعة لاحقة» بلا قضية، «أولاً» في docstring `reverse_stock_movements`، والوثيقة لا تسمّي قفل الفاتورة.
+  Spec النهائية بعد fix3: **PASS** (nits: اختبار j لا يؤكّد عودة الطبقات للصفر، وتعليق النموذج يقول «حذف» لا «إلغاء ترحيل»).
+  البوّابة المعزولة بعد fix3: 1 failed (البيئي `PaperAmountsPayloadTest` وحده)، **8010 passed**، 1080s؛ makemigrations: No changes detected.
+  ✅ **M1B-R مودعة محلياً (بلا push)** — الالتزام في `git log` بعنوان `fix(M1B-R-COGS)`. ▶ **التالي: M1B-2** (استكشاف بالقارئ ← موجز).
 - ✅ البوّابة المعزولة بعد fix1: 7996 passed + `PaperAmountsPayloadTest` البيئي وحده.
 - ✅ المراجعتان النهائيتان: Spec ← PASS. Standards ← major واحد (اختبار التسليم لا يسقط إن مُرِّر `total_cost` لأن
   effective == total في الـfixture). **fix2 (الجولة 2 من 3) يعمل** بموجز `scratchpad/briefs/M1B-1-fix2.txt` (PropertyMock 18 مقابل 20

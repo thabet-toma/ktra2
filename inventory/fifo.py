@@ -30,6 +30,7 @@ from .models import (
     StockLayer,
     StockLayerConsumption,
     StockLayerReconciliation,
+    StockLayerRestoration,
     StockMovement,
 )
 
@@ -470,7 +471,7 @@ class RestoreResult(NamedTuple):
     by_origin: dict[int, tuple[Decimal, Decimal]]
 
 
-def restore_partial(*, movements, quantity=None) -> RestoreResult:
+def restore_partial(*, movements, quantity=None, restored_by=None) -> RestoreResult:
     """يردّ استهلاكَ حركةٍ (أو حركاتِ مستندٍ واحدٍ لمنتجٍ واحد) إلى طبقاتها —
     كلَّه أو `quantity` منه — **بعكس ترتيب الاستهلاك**.
 
@@ -483,6 +484,9 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
 
     صفُّ استهلاكٍ يُفكّ **جزئياً** تُنقَص كميّتُه ولا يُحذف — سجلُّ ما بقي
     مستهلَكاً يبقى صادقاً، فمرتجعٌ ثانٍ لاحقاً يجد ما يفكّه.
+
+    يُمرَّر `restored_by` لحركة المرتجع الواردة لتسجيل أثرها؛ مسار إلغاء
+    ترحيل الصادر لا يمرّره لأنه يردّ الاستهلاك بلا سجلّ مرتجع.
 
     `quantity=None` ⟵ ردٌّ كامل. والكميّةُ الأكبر ممّا استُهلك فعلاً تُردّ إلى
     حدّ المتاح ولا ترمي — المستدعي يقارن `RestoreResult.quantity` بما طلبه.
@@ -513,6 +517,7 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
         rows = 0
         by_origin = {}
         drop_ids = []
+        restorations = []
         for c in consumptions:
             if remaining is not None and remaining <= 0:
                 break
@@ -520,6 +525,12 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
             if take <= 0:
                 continue
             layer = locked_layers[c.layer_id]
+            if restored_by is not None:
+                restorations.append(StockLayerRestoration(
+                    tenant_id=layer.tenant_id, movement=restored_by,
+                    origin_movement_id=c.movement_id, layer=layer,
+                    quantity=take, unit_cost=c.unit_cost,
+                ))
             layer.remaining_qty = (layer.remaining_qty + take).quantize(Q4)
             layer.save(update_fields=["remaining_qty"])
             restored_qty += take
@@ -537,6 +548,7 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
 
         if drop_ids:
             StockLayerConsumption.objects.filter(pk__in=drop_ids).delete()
+        StockLayerRestoration.objects.bulk_create(restorations)
         return RestoreResult(
             quantity=restored_qty.quantize(Q4),
             cost=restored_cost.quantize(Q4),
