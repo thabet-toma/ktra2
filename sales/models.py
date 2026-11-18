@@ -3,7 +3,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import models
 
 from accounting.models import Account, JournalHeader, TaxRate
-from inventory.models import Product
+from inventory.models import COGS_METHOD_CHOICES, COGS_METHOD_FIFO, Product
 from inventory.serials import SERIAL_MODE_CHOICES, SERIAL_MODE_OFF
 from partners.models import Partner
 from tenants.models import Currency, Tenant
@@ -139,6 +139,18 @@ class SalesSettings(models.Model):
         related_name="sales_settings_cogs",
         help_text="حساب تكلفة مبيعات افتراضي",
     )
+    # M1A-COGS: فروقاتُ التكلفة (المعيارية / آخر سعر شراء) تُقيَّد على حسابٍ
+    # مستقلّ عن تكلفة المبيعات نفسها. فارغٌ = لم يُضبط — ولا قراءةَ له بعد:
+    # ترحيلُ الفرق يبدأ في M1B مع محرّك الطريقة.
+    cost_variance_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="CostVarianceAccountID",
+        related_name="sales_settings_cost_variance",
+        help_text="حساب فروقات تكلفة المبيعات (فارغ = لم يُضبط)",
+    )
     default_ar_account = models.ForeignKey(
         Account,
         on_delete=models.SET_NULL,
@@ -215,6 +227,16 @@ class SalesSettings(models.Model):
         default=False,
         db_column="UseMovingAverageCost",
         help_text="مفعّل = متوسط مرجّح متحرك (تكلفة لحظة البيع، مثل الأنظمة الاحترافية)؛ معطّل = متوسط كل فواتير الشراء (النموذج الدوري)",
+    )
+    # M1A-COGS: الطريقةُ المختارة للشركة — **تُخزَّن ولا تختار بعد**: لا محرّكَ
+    # يقرؤها ولا API/واجهة تعرضها (M1B). `use_moving_average_cost` أعلاه
+    # تبقى كما هي حتى تُنفَّذ الطرقُ فعلياً، ولا تُخلط بها.
+    cogs_cost_method = models.CharField(
+        max_length=20,
+        choices=COGS_METHOD_CHOICES,
+        default=COGS_METHOD_FIFO,
+        db_column="CogsCostMethod",
+        help_text="طريقة تكلفة المبيعات للشركة (تُخزَّن الآن؛ التنفيذ في M1B)",
     )
 
     default_vat_rate = models.ForeignKey(

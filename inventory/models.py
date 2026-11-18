@@ -1,8 +1,30 @@
+from decimal import Decimal
+
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models.functions import NullIf
 from tenants.models import Tenant
 from partners.models import Partner
 from core.user_roles import user_display_name
+
+
+# ── M1A-COGS: طرق تكلفة المبيعات — مصدرُ الاختيارات الواحد ───────────────────
+# تُعرَّف هنا مرّةً واحدة لأن `sales` يستورد `inventory.models` أصلاً، والعكس
+# (inventory ← sales) ممنوع. `StockMovement.cogs_method` و
+# `SalesSettings.cogs_cost_method` يقرآن القائمةَ نفسها فلا تفترق نسختان.
+# **هذه الشريحة تخزينٌ فقط**: لا محرّكٌ يكتب اللقطة ولا اختيارٌ فعّالٌ في الـAPI؛
+# الطرقُ الأربع تُنفَّذ في M1B وما بعده.
+COGS_METHOD_FIFO = 'fifo'
+COGS_METHOD_AVCO = 'avco'
+COGS_METHOD_STANDARD = 'standard'
+COGS_METHOD_LAST_PURCHASE = 'last_purchase'
+COGS_METHOD_CHOICES = [
+    (COGS_METHOD_FIFO, 'الوارد أولاً صادر أولاً (FIFO)'),
+    (COGS_METHOD_AVCO, 'متوسط مرجّح بالكميّة (AVCO)'),
+    (COGS_METHOD_STANDARD, 'تكلفة معيارية للمنتج'),
+    (COGS_METHOD_LAST_PURCHASE, 'آخر سعر شراء مرحَّل'),
+]
+
 
 class UnitOfMeasure(models.Model):
     id = models.AutoField(primary_key=True, db_column='UOMID')
@@ -250,6 +272,15 @@ class Product(models.Model):
         max_digits=18, decimal_places=4, default=0, db_column='AvgCost',
         help_text='Weighted average cost per unit (base currency)',
     )
+    # M1A-COGS: التكلفة المعيارية للوحدة. `NULL` = «لم تُحدَّد» وليست صفراً؛
+    # والصفرُ كلفةٌ صريحةٌ صالحة (منتجٌ مجّانيّ أو بندٌ بلا كلفة). لا قارئَ
+    # لهذا العمود بعد — محرّك الطريقة وفروقاتُها في M1B.
+    standard_cost = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True,
+        db_column='StandardCost',
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text='التكلفة المعيارية للوحدة (العملة الأساسية) — فارغة تعني «لم تُحدَّد»',
+    )
     # كرت المنتج: «سعر البيع» بجانب «سعر التكلفة» — سعر البيع الافتراضي المعتمد
     # للمنتج (بالعملة الأساسية). فارغ = لا سعر محفوظ، فتُظهر البطاقة آخر سعر بيع
     # فعلي بدلاً منه. لا أثر محاسبي — مرجع تسعير يقترحه المستند.
@@ -474,6 +505,20 @@ class StockMovement(models.Model):
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
     unit_cost = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='UnitCost')
     total_cost = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='TotalCost')
+    # M1A-COGS: لقطةُ تكلفة المبيع وطريقتها على الحركة نفسها. `NULL` في
+    # الاثنين = «تاريخية / لم تُلتقط» — **لا تعبئة للحركات القائمة**، والقارئُ
+    # المستقبليّ يسقط إلى `total_cost`. والصفرُ في `cogs_cost` قيمةٌ صريحةٌ
+    # تُفرَّق عن الغياب. لا كاتبَ لهما بعد: الترحيل يبقى على `total_cost` كما هو.
+    cogs_cost = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='CogsCost',
+        validators=[MinValueValidator(Decimal('0'))],
+        help_text='تكلفة المبيع الملتقطة على الحركة (قيمة مطلقة) — فارغة تعني «لم تُلتقط»',
+    )
+    cogs_method = models.CharField(
+        max_length=20, choices=COGS_METHOD_CHOICES, null=True, blank=True,
+        db_column='CogsMethod',
+        help_text='طريقة التكلفة وقت الحركة (لقطة لا تتبع تغيّر الإعدادات) — فارغة تعني تاريخية',
+    )
     reference_type = models.CharField(max_length=20, choices=REFERENCE_TYPES, default='MANUAL', db_column='ReferenceType')
     reference_id = models.IntegerField(null=True, blank=True, db_column='ReferenceID')
     partner = models.ForeignKey(Partner, on_delete=models.SET_NULL, null=True, blank=True, db_column='PartnerID')
