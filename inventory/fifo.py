@@ -461,11 +461,13 @@ def pending_provisional_layers(*, tenant_id: int) -> list:
 
 class RestoreResult(NamedTuple):
     """ناتج `restore_partial()`: الكميّةُ المردودة فعلاً وكلفتُها وعددُ صفوف
-    الاستهلاك التي مسّها الردّ (فُكّت كلياً أو نُقصت)."""
+    الاستهلاك التي مسّها الردّ (فُكّت كلياً أو نُقصت).
+    `by_origin`: معرّف حركة الأصل ← (الكميّة المستعادة، التكلفة المستعادة)."""
 
     quantity: Decimal
     cost: Decimal
     rows: int
+    by_origin: dict[int, tuple[Decimal, Decimal]]
 
 
 def restore_partial(*, movements, quantity=None) -> RestoreResult:
@@ -488,7 +490,7 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
     movement_list = movements if isinstance(movements, (list, tuple, set)) else [movements]
     movement_ids = [m.pk if hasattr(m, "pk") else m for m in movement_list]
     if not movement_ids:
-        return RestoreResult(Decimal("0"), Decimal("0"), 0)
+        return RestoreResult(Decimal("0"), Decimal("0"), 0, {})
 
     with transaction.atomic():
         consumptions = list(
@@ -497,7 +499,7 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
             .order_by("-id")
         )
         if not consumptions:
-            return RestoreResult(Decimal("0"), Decimal("0"), 0)
+            return RestoreResult(Decimal("0"), Decimal("0"), 0, {})
 
         remaining = None if quantity is None else _d(quantity).quantize(Q4)
         locked_layers = {
@@ -509,6 +511,7 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
         restored_qty = Decimal("0")
         restored_cost = Decimal("0")
         rows = 0
+        by_origin = {}
         drop_ids = []
         for c in consumptions:
             if remaining is not None and remaining <= 0:
@@ -521,6 +524,8 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
             layer.save(update_fields=["remaining_qty"])
             restored_qty += take
             restored_cost += take * c.unit_cost
+            origin_qty, origin_cost = by_origin.get(c.movement_id, (Decimal("0"), Decimal("0")))
+            by_origin[c.movement_id] = (origin_qty + take, origin_cost + take * c.unit_cost)
             rows += 1
             if take >= c.quantity:
                 drop_ids.append(c.pk)
@@ -536,6 +541,7 @@ def restore_partial(*, movements, quantity=None) -> RestoreResult:
             quantity=restored_qty.quantize(Q4),
             cost=restored_cost.quantize(Q4),
             rows=rows,
+            by_origin=by_origin,
         )
 
 

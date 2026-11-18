@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
+from django.db.models.functions import Coalesce
 
 from accounting.models import Account, JournalLine
 from accounting.services import (
@@ -66,9 +67,7 @@ def sales_cogs_map(
     حركات مخزون البيع (`SALE`/`STOCK_ISSUE`) المرتبطة بالفواتير المُمرَّرة، في
     **استعلام تجميعي واحد** (لا استعلام داخل حلقة).
 
-    التكلفة هنا تاريخية بحقّ: `record_stock_movement` يخزّن الصادر بكمية موجبة
-    و`total_cost = qty × avg_cost_before` لحظة الترحيل/التسليم، فمجموعها هو
-    تكلفة البضاعة المباعة كما كانت يومها — لا يحرّكها شراء لاحق يرفع المتوسط.
+    تكلفة `cogs_cost` إن وُجدت، وإلا `total_cost` وهي كلفة الطبقات المستهلَكة.
     حركة التسليم نفسها `reference_type="SALE"` (قيد `SALES_DELIVERY_COGS` قيدٌ لا
     حركة)، فتكلفة التسليم داخلة في القاعدة تلقائياً.
 
@@ -84,7 +83,7 @@ def sales_cogs_map(
             reference_id__in=ids,
         )
         .values("reference_id", "product_id")
-        .annotate(cost=Sum("total_cost"), qty=Sum("quantity"))
+        .annotate(cost=Sum(Coalesce("cogs_cost", "total_cost")), qty=Sum("quantity"))
     )
     return {
         (r["reference_id"], r["product_id"]): {

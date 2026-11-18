@@ -432,10 +432,11 @@ def _build_cogs_journal_line_dicts(
     products_by_id: dict[int, Product],
     *,
     costs_by_product: dict[int, Decimal],
+    cogs_by_product: dict[int, Decimal] | None = None,
     quantities: dict[int, Decimal] | None = None,
 ) -> list[dict]:
-    """Dr COGS / Cr Inventory — المبلغ من الكلفة الفعليّة المسجَّلة على حركات
-    المخزون (FIFO، مواصفة #137)، لا من `Product.avg_cost`.
+    """Dr COGS / Cr Inventory — قيمة المخزون من حركاته، وكلفة المبيعات من
+    لقطة الطريقة إن وُجدت؛ والفرق يذهب إلى حساب الفروقات.
 
     `Product.avg_cost` صار تحت #137 (المرحلة 2) رقماً **مشتقّاً للعرض** —
     قيمة الطبقات المفتوحة ÷ كميّتها (`inventory.fifo.derived_avg_cost`) — لا
@@ -444,7 +445,7 @@ def _build_cogs_journal_line_dicts(
     طبقتين بسعرين مختلفين (متوسّطٌ مذاب لا كلفة الطبقات المستهلَكة فعلاً)، بل
     وتُنتج **صفراً كاذباً** إن استُهلكت كل الطبقات المفتوحة قبل هذا الاستدعاء
     (لا بضاعة متبقية ⇒ `derived_avg_cost` = 0) رغم أن البيعة الحالية لها كلفة
-    حقيقية موجبة سجّلتها حركتها الخاصة — فيُسقطها `if amt <= 0` بصمت.
+    حقيقية موجبة سجّلتها حركتها الخاصة — فيُسقطها الحارس القديم بصمت.
 
     `costs_by_product`: {معرّف المنتج ← مجموع `StockMovement.total_cost` الفعلي}
     من حركات المخزون التي أُنشئت **لهذا المستند تحديداً** (وزُوِّدت *قبل*
@@ -452,6 +453,8 @@ def _build_cogs_journal_line_dicts(
     إلزاميٌّ بلا احتياطٍ إلى `avg_cost`: مستدعٍ لا يملك هذه الكلفة بعد يعني أن
     حركة المخزون لم تُنشأ بعد — خللٌ في ترتيب الاستدعاء يجب أن يُصلَح لا أن
     يُخفى بقيمة وهمية تُعيد نفس عطب الانحراف الصامت.
+
+    `cogs_by_product` يحمل لقطة الطريقة؛ افتراضه قيمة المخزون نفسها.
 
     quantities: كمية بديلة لكل سطر (بمعرّف السطر) — يستعملها التسليم الجزئي كي
     تكون التكلفة على المُسلَّم فعلاً لا على كامل السطر. None = كامل الكمية.
@@ -461,7 +464,8 @@ def _build_cogs_journal_line_dicts(
     fb_cogs = ss.default_cogs_account_id
     fb_inv = ss.default_inventory_account_id
 
-    pair_totals: dict[tuple[int, int], Decimal] = defaultdict(Decimal)
+    pair_totals: dict[tuple[int, int], list[Decimal]] = {}
+    variance_total = Decimal("0")
     seen_products: set[int] = set()
     for line in lines:
         p = products_by_id[line.product_id]
@@ -484,8 +488,13 @@ def _build_cogs_journal_line_dicts(
                 f"هذا المستند — تأكد من إنشاء حركة المخزون قبل بناء قيد التكلفة."
             )
         amt = Decimal(str(amt)).quantize(DEC)
-        if amt <= 0:
+        cogs = Decimal(str((cogs_by_product or {}).get(line.product_id, amt))).quantize(DEC)
+        if amt <= 0 and cogs <= 0:
             continue
+        variance = amt - cogs
+        if variance and not ss.cost_variance_account_id:
+            raise ValidationError("عيّن حساب فروقات تكلفة المبيعات في إعدادات المبيعات.")
+        variance_total += variance
         cat = p.category
         cogs_id = cat.cogs_account_id if cat and cat.cogs_account_id else fb_cogs
         inv_id = cat.inventory_account_id if cat and cat.inventory_account_id else fb_inv
@@ -495,30 +504,31 @@ def _build_cogs_journal_line_dicts(
                 f"المنتج «{p.sku}» — الفئة «{cname}»: عيّن حساب تكلفة المبيعات والمخزون في فئة المنتج "
                 f"أو حسابات افتراضية في إعدادات المبيعات، أو عطّل خصم المخزون عند الترحيل."
             )
-        pair_totals[(cogs_id, inv_id)] += amt
+        totals = pair_totals.setdefault((cogs_id, inv_id), [Decimal("0"), Decimal("0")])
+        totals[0] += cogs
+        totals[1] += amt
 
     rows: list[dict] = []
-    for (cid, iid), amt in pair_totals.items():
-        if amt <= 0:
-            continue
-        rows.append(
-            {
-                "account": cid,
-                "partner": None,
-                "debit": amt,
+    for (cid, iid), (cogs, amt) in pair_totals.items():
+        if cogs > 0:
+            rows.append({
+                "account": cid, "partner": None, "debit": cogs,
                 "credit": Decimal("0"),
                 "description": f"تكلفة مبيعات — {invoice.invoice_number}",
-            }
-        )
-        rows.append(
-            {
-                "account": iid,
-                "partner": None,
-                "debit": Decimal("0"),
+            })
+        if amt > 0:
+            rows.append({
+                "account": iid, "partner": None, "debit": Decimal("0"),
                 "credit": amt,
                 "description": f"تخفيض مخزون — {invoice.invoice_number}",
-            }
-        )
+            })
+    if variance_total:
+        rows.append({
+            "account": ss.cost_variance_account_id, "partner": None,
+            "debit": max(variance_total, Decimal("0")),
+            "credit": max(-variance_total, Decimal("0")),
+            "description": f"فروقات تكلفة المبيعات — {invoice.invoice_number}",
+        })
     return rows
 
 

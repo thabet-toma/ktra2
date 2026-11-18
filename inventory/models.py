@@ -12,8 +12,8 @@ from core.user_roles import user_display_name
 # تُعرَّف هنا مرّةً واحدة لأن `sales` يستورد `inventory.models` أصلاً، والعكس
 # (inventory ← sales) ممنوع. `StockMovement.cogs_method` و
 # `SalesSettings.cogs_cost_method` يقرآن القائمةَ نفسها فلا تفترق نسختان.
-# **هذه الشريحة تخزينٌ فقط**: لا محرّكٌ يكتب اللقطة ولا اختيارٌ فعّالٌ في الـAPI؛
-# الطرقُ الأربع تُنفَّذ في M1B وما بعده.
+# حالياً يكتب مرتجع البيع اللقطةَ لأصول الطرق الثابتة وحدها؛ حركات البيع
+# تكتبها في M1B-2، ولا اختيارٌ فعّالٌ في الـAPI بعد.
 COGS_METHOD_FIFO = 'fifo'
 COGS_METHOD_AVCO = 'avco'
 COGS_METHOD_STANDARD = 'standard'
@@ -505,10 +505,10 @@ class StockMovement(models.Model):
     quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
     unit_cost = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='UnitCost')
     total_cost = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='TotalCost')
-    # M1A-COGS: لقطةُ تكلفة المبيع وطريقتها على الحركة نفسها. `NULL` في
-    # الاثنين = «تاريخية / لم تُلتقط» — **لا تعبئة للحركات القائمة**، والقارئُ
-    # المستقبليّ يسقط إلى `total_cost`. والصفرُ في `cogs_cost` قيمةٌ صريحةٌ
-    # تُفرَّق عن الغياب. لا كاتبَ لهما بعد: الترحيل يبقى على `total_cost` كما هو.
+    # يكتب المرتجع اللقطة عند وجود لقطة طريقة ثابتة في أصلٍ؛ مسارا القيد
+    # وsales_cogs_map يستخدمون
+    # cogs_cost إن وُجدت وإلا total_cost، والصفر قيمة صريحة. تكلفة موجودة
+    # مع طريقة NULL تعني مرتجعاً خلط أصولاً بطرق مختلفة؛ لا تعبئة للحركات القائمة.
     cogs_cost = models.DecimalField(
         max_digits=18, decimal_places=2, null=True, blank=True, db_column='CogsCost',
         validators=[MinValueValidator(Decimal('0'))],
@@ -562,6 +562,11 @@ class StockMovement(models.Model):
 
     def __str__(self):
         return f"{self.get_movement_type_display()} | {self.product} | {self.quantity}"
+
+    @property
+    def effective_cogs(self):
+        # نظير Coalesce في sales/services/pricing.py (sales_cogs_map).
+        return self.cogs_cost if self.cogs_cost is not None else self.total_cost
 
     @property
     def origin(self) -> str:

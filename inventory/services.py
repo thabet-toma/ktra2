@@ -7,11 +7,13 @@ All stock changes go through record_stock_movement() which:
 """
 import logging
 import re
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from django.db import IntegrityError, transaction
+from django.db.models import Sum
 from django.core.exceptions import ValidationError
 
 from .models import (
+    COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD,
     Product, ProductFamily, ProductMerge, ProductStorageLocation, StockLayer,
     StockLayerConsumption, StockMovement,
 )
@@ -133,6 +135,50 @@ def family_display_name(family, family_id=None) -> str:
             return name
         family_id = family_id or getattr(family, 'id', None)
     return f'عائلة #{family_id}' if family_id else ''
+
+
+FIXED_COGS_METHODS = (COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE)
+
+
+def _has_fixed_cogs_snapshot(origin):
+    return origin.cogs_method in FIXED_COGS_METHODS and origin.cogs_cost is not None
+
+
+def _cumulative_cogs(origin, qty):
+    return (origin.cogs_cost * qty / origin.quantity).quantize(
+        Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
+def _fixed_cogs_reversal(
+    restored, restore_sources, total_cost,
+) -> tuple[Decimal, str | None] | None:
+    origins = {src.pk: src for src in restore_sources}
+    fixed_pks = [
+        pk for pk in restored.by_origin if _has_fixed_cogs_snapshot(origins[pk])
+    ]
+    if not fixed_pks:
+        return None
+    consumed_by_origin = {
+        row['movement_id']: row['q']
+        for row in StockLayerConsumption.objects.filter(movement_id__in=fixed_pks)
+        .values('movement_id').annotate(q=Sum('quantity'))
+    }
+    fixed_value = sum((restored.by_origin[pk][1] for pk in fixed_pks), Decimal('0'))
+    reversed_cost = total_cost - fixed_value.quantize(Decimal('0.0001')).quantize(Decimal('0.01'))
+    for pk in fixed_pks:
+        origin = origins[pk]
+        restored_qty = restored.by_origin[pk][0]
+        still_consumed = consumed_by_origin.get(pk, Decimal('0'))
+        after = origin.quantity - still_consumed
+        before = after - restored_qty
+        # فرق التراكمي قبل الرد وبعده يجعل المراجيع المتتابعة تتطابق مع الإجمالي.
+        reversed_cost += _cumulative_cogs(origin, after) - _cumulative_cogs(origin, before)
+    methods = {origins[pk].cogs_method for pk in fixed_pks}
+    method = (
+        next(iter(methods))
+        if len(fixed_pks) == len(restored.by_origin) and len(methods) == 1 else None
+    )
+    return reversed_cost.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), method
 
 
 INBOUND_TYPES = {'IN', 'ADJUST_IN', 'RETURN_IN'}
@@ -940,6 +986,12 @@ def record_stock_movement(
                         movement=movement, quantity=surplus, unit_cost=surplus_cost,
                     )
                     total_cost = (total_cost + surplus * surplus_cost).quantize(Decimal('0.01'))
+                # تعكس الطرق الثابتة لقطة الأصل تراكمياً؛ وغيرها قيمة الطبقة.
+                # انظر docs/decisions/cogs_cost_methods.md §3.3.
+                if movement_type == 'RETURN_IN':
+                    snapshot = _fixed_cogs_reversal(restored, restore_sources, total_cost)
+                    if snapshot is not None:
+                        movement.cogs_cost, movement.cogs_method = snapshot
                 unit_cost = (
                     (total_cost / quantity).quantize(Decimal('0.0001'))
                     if quantity > 0 else Decimal('0')
@@ -1014,7 +1066,10 @@ def record_stock_movement(
         movement.unit_cost = unit_cost
         movement.total_cost = total_cost
         movement.avg_cost_after = new_avg.quantize(Decimal('0.0001'))
-        movement.save(update_fields=['unit_cost', 'total_cost', 'avg_cost_after'])
+        update_fields = ['unit_cost', 'total_cost', 'avg_cost_after']
+        if movement.cogs_cost is not None:
+            update_fields += ['cogs_cost', 'cogs_method']
+        movement.save(update_fields=update_fields)
 
         prod.quantity_on_hand = new_qty
         prod.avg_cost = new_avg.quantize(Decimal('0.0001'))

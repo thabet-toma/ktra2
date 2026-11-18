@@ -1673,8 +1673,10 @@ def post_sales_invoice(
                 stock_movements = _post_stock_out_for_invoice(invoice, lines, user=user)
 
         costs_by_product: dict[int, Decimal] = defaultdict(Decimal)
+        cogs_by_product: dict[int, Decimal] = defaultdict(Decimal)
         for mv in stock_movements:
             costs_by_product[mv.product_id] += Decimal(str(mv.total_cost))
+            cogs_by_product[mv.product_id] += Decimal(str(mv.effective_cogs))
 
         journal_lines: list[dict] = []
 
@@ -1773,7 +1775,8 @@ def post_sales_invoice(
 
         if invoice.stock_on_post:
             journal_lines.extend(_build_cogs_journal_line_dicts(
-                invoice, lines, products_by_id, costs_by_product=costs_by_product))
+                invoice, lines, products_by_id, costs_by_product=costs_by_product,
+                cogs_by_product=cogs_by_product))
 
         # ── M2-T4 (G6): Source-discount / withholding ──────────────────────
         # Source discount = the slice of the invoice the customer holds back as
@@ -2490,6 +2493,7 @@ def deliver_invoice_lines(
             delivery.save(update_fields=["delivery_number", "delivery_date", "updated_at"])
 
         costs_by_product: dict[int, Decimal] = defaultdict(Decimal)
+        cogs_by_product: dict[int, Decimal] = defaultdict(Decimal)
         for line_id, qty in delivered_now.items():
             line = lines_by_id[line_id]
             warehouse = warehouse_by_line.get(line_id)
@@ -2516,6 +2520,7 @@ def deliver_invoice_lines(
             # `product.avg_cost` الذي حدّثته الحركة للتوّ (رقمٌ مشتقٌّ للعرض،
             # قد يستقرّ على صفر إن استُهلكت كل الطبقات المفتوحة).
             costs_by_product[line.product_id] += Decimal(str(movement.total_cost))
+            cogs_by_product[line.product_id] += Decimal(str(movement.effective_cogs))
             DeliveryOrderLine.objects.create(
                 tenant=invoice.tenant,
                 delivery=delivery,
@@ -2533,7 +2538,8 @@ def deliver_invoice_lines(
         # قيد تكلفة المبيعات للكمية المسلَّمة في هذه الإرسالية وحدها.
         cogs_rows = _build_cogs_journal_line_dicts(
             invoice, inv_lines, products_by_id,
-            costs_by_product=costs_by_product, quantities=delivered_now,
+            costs_by_product=costs_by_product, cogs_by_product=cogs_by_product,
+            quantities=delivered_now,
         )
         cogs_journal = None
         if cogs_rows:

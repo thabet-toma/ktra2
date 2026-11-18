@@ -18,8 +18,56 @@
   السجلّ `gate-last.log` بجانبه. يُعاد إنشاؤه من هذا الوصف إن ضاع.
 - **لا push:** الرفع يحمل `13da894b` (عرض أسعار الشراء) الذي اشترط المالك قبله نسخةً احتياطية وعرض التغييرات.
   كل الإيداعات محلية حتى M4.
-- **الخطوة الجارية:** بوّابة M1A الكاملة في النسخة المعزولة. بعدها إيداع M1A (ملفاتها: `inventory/models.py`،
-  `sales/models.py`، الهجرتان `0046`/`0054`، `sales/tests/test_cogs_cost_methods.py`، ووثائقها)، ثم موجز M1B-1.
+- ✅ **M1A مودعة** `4e9a4e38` (محلياً). البوّابة المعزولة: 7982 passed، وفشل واحد `PaperAmountsPayloadTest`
+  بيئيّ (execnet تحت xdist؛ يمرّ منفرداً 7 passed، ومثبت على HEAD سابقاً).
+- ✅ **Codex CLI حُدِّث** إلى `0.170.0` بإذن المالك (كان 0.154.0 فرفض `gpt-6.1-terra` بـmodel_not_found، والتشغيل
+  r1 فشل بلا أي تعديل).
+- ⛔ **M1B-1 r2 فشل بلا أي تعديل:** `windows sandbox failed: helper_unknown_error: setup refresh had errors`. السبب
+  (من `~/.codex/.sandbox/sandbox.2026-11-18.log`): الـCLI 0.170 يختار وضع `elevated` (من `[windows] sandbox =
+  "elevated"` في `~/.codex/config.toml`) فيحاول إضافة ACE على مجلد المستودع ويُرفض (WRITE_DAC، Access denied).
+  التطبيق المكتبي والـCLI القديم كانا يستعملان `mxc`. **مُجرَّب:** `codex exec -s workspace-write -c
+  'windows.sandbox="mxc"'` يكتب في المستودع ويشغّل Python/Django. الحل المقترح على المالك: تغيير السطر إلى
+  `sandbox = "mxc"` (الـrelay لا يمرّر `-c`). ✅ **المالك وافق وغُيّر السطر.**
+- ✅ **M1B-1 r3 انتهى** (17 دقيقة، `threadId 01a1eded-28e6-7263-a216-0aa138cfd673` للتصليح بـ`--session`). عدّل
+  `inventory/fifo.py` و`inventory/services.py` و`sales/services/{calc,flow,pricing}.py` والوثائق، وأضاف
+  `sales/tests/test_cogs_variance_journal.py` و`inventory/tests/test_restore_origin_breakdown.py`. نتيجته:
+  `sales+after_sales+cogs report` ← 1 failed / 1286 passed. الفشل الوحيد `test_telescoping_returns`: **خطأ حسابي
+  في موجزي** (توقّعتُ 33.33/33.33/33.34، والمعادلة المحسومة تعطي 33.33/33.34/33.33). **القرار: المعادلة تغلب،
+  يُصحَّح توقّع الاختبار.**
+- 🔄 **قرأتُ الفرق كاملاً.** ملاحظاتي للتصليح: توقّع telescoping؛ استيرادان غير مستعملين في الاختبار (`fifo`،
+  `SalesInvoiceLine`)؛ `lambda` مسندة وأسطر طويلة في كتلة `RETURN_IN` في `inventory/services.py`؛ `docs/modules/sales.md`
+  حذف سبب «الوسيط إلزامي بلا احتياط إلى avg_cost» وذكر `create_standalone_delivery_note`.
+- ✅ **المراجعتان انتهتا بلا مانع** (Spec تحقّقت بالتشغيل من قيود 52/44/8 و52/12/64 ومن تطابق القيد اليوم). المقبول كله في
+  `scratchpad/briefs/M1B-1-fix1.txt`. أبرز قراراته: ثابت `FIXED_COGS_METHODS` ودالّة `_cumulative_cogs` بدل lambda، واستعلام
+  مجمَّع واحد قبل الحلقة، وفرق التقريب من الأصول الثابتة وحدها، و`cogs_method` = الطريقة المشتركة فقط إن حملت كل الأصول لقطة
+  ثابتة، و`StockMovement.effective_cogs`، وتحديث تعليق الموديل، واختبارات (fifo بلقطة 112، ومنتجان يتعادل فرقاهما، وفحص
+  `cogs_by_product` في مسار التسليم بـ`patch(wraps=)`)، وإعادة سبب الوسيط الإلزامي إلى `sales.md`. أما `create_standalone_delivery_note`
+  فيبقى عمداً على `total_cost` لأنه ينقل القيمة إلى حساب وسيط وليس قيد COGS. **⚠ يجب فحصه في M1B-2/M1B-3: هل الفاتورة اللاحقة
+  تنقل من الحساب الوسيط إلى COGS بلقطة الطريقة؟**
+- ✅ **M1B-1 fix1 انتهى** (27 دقيقة): 33 passed مركّزة، وsales+after_sales+cogs report ← 1291 passed. `inventory/tests -n auto` توقّف
+  عند 97% عنده (بيئي محتمل، والبوّابة المعزولة تحكم). قرأتُ الفرق كاملاً وهو نظيف.
+- ✅ **fix2 انتهى** (7 دقائق)، وقرأتُ الفرق وتحقّقتُ يدوياً من 54 و75 و1.50. المراجعتان النهائيتان على الحالة النهائية: **Spec ← PASS،
+  Standards ← بلا مانع** (فقط تعليقات قديمة). البوّابة المعزولة بعد fix2: **7999 passed** + البيئي وحده. وmakemigrations ← No changes.
+- ✅ **fix3 انتهى** (تعليقات وأسماء)، والبوّابة الأخيرة 7999 passed + البيئي وحده. **M1B-1 مودعة محلياً** (انظر `git log -1`). قرار: يبقى
+  فحص حساب الفروقات لكل منتج (الأصرم).
+- ▶ **التالي مباشرةً: M1B-R.** الموجز جاهز في `scratchpad/briefs/M1B-R.txt` (نموذج `StockLayerRestoration` وهجرة 0047، و`restore_partial(restored_by=)`،
+  والعكس في `reverse_stock_movements` بحارس، والمرتجعات القديمة بلا أثر تبقى كاليوم، واختبارات a–g). الحقائق في `runs/R-M1B-R-facts/final.txt`.
+  يُرسل بتشغيل خلفي إلى `runs/M1B-R-r1`.
+- ✅ البوّابة المعزولة بعد fix1: 7996 passed + `PaperAmountsPayloadTest` البيئي وحده.
+- ✅ المراجعتان النهائيتان: Spec ← PASS. Standards ← major واحد (اختبار التسليم لا يسقط إن مُرِّر `total_cost` لأن
+  effective == total في الـfixture). **fix2 (الجولة 2 من 3) يعمل** بموجز `scratchpad/briefs/M1B-1-fix2.txt` (PropertyMock 18 مقابل 20
+  وسطر فروقات 2، واختبارا الأصول المختلطة والفائض، واستخراج `_fixed_cogs_reversal`، والتقريب بخطوتين 4 ثم 2 خانات، وتصحيح
+  الوثائق والتعليق). بعده: قراءة الفرق، ثم مراجعة نهائية، ثم البوّابة، ثم الإيداع.
+- 🐞 **ثبت بالقراءة عيبٌ قديم من #137 (خارج M1B-1):** إلغاء ترحيل مرتجع البيع (`sales/views.py` `unpost_invoice` ← `accounting/services.py`
+  `unpost_document` ← `inventory/services.py` `reverse_stock_movements`) يحذف RETURN_IN لكنه **لا يعيد استهلاك الطبقات** التي رفعها
+  `restore_partial` ولا يعيد صفوف استهلاك البيعة. مثال: 8@10 و4@16، ثم بيع 10، ثم مرتجع 4، ثم إلغاؤه ← الطبقات 2+4 (=84) والرصيد 2.
+  إعادة الترحيل تعكس 40 بدل 52. لا اختبار post←unpost للطبقات. **الإصلاح:** حفظ أثر الاستعادة لكل مرتجع وعكسه ذرّياً عند الإلغاء.
+  التقرير في `runs/R-return-unpost/final.txt`. ✅ **المالك: «Yes, before M4»** ← أُضيف تذكرة **M1B-R** في §5 من الخطة، وتُنفَّذ
+  **مباشرةً بعد إيداع M1B-1** (تلمس مسار المرتجع نفسه)، وM4 صار يعتمد عليها. **الترتيب الجديد:** M1B-1 ← M1B-R ← M1B-2 ← M1B-3 ← M1B-4
+  ← M3 ← M2 ← M4 ← M0 ← M5.
+- (سابقاً) مراجعتان نهائيتان + البوّابة بالتوازي.
+  **سقف التصليح:** جولة جديدة فقط لمانع أو ملاحظة major، وبحد أقصى 3 جولات، ثم يُعرض الأمر على المالك. إن خلت المراجعتان
+  من مانع والبوّابة خضراء (عدا `PaperAmountsPayloadTest` البيئي) يأتي الإيداع المحلي `feat(M1B-1-COGS): …` ثم runs.md.
 
 ## ⏸ توقف بطلب المالك — 2026-11-17، 19:59 Asia/Hebron
 
