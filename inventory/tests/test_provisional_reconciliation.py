@@ -16,11 +16,14 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db.models import F, Sum
 
 from accounting.models import Account, FiscalPeriod, JournalHeader
-from inventory.models import Product, ProductCategory, StockLayer
+from inventory.cogs_method import MISSING_COST_VARIANCE_ACCOUNT_ERROR
+from inventory.models import Product, ProductCategory, StockLayer, StockMovement
 from inventory.services import record_stock_movement
+from sales.models import SalesSettings
 from tenants.services import create_company
 
 pytestmark = pytest.mark.django_db
@@ -460,3 +463,209 @@ def test_pending_provisional_layers_report_excludes_reconciled_and_deletes_nothi
     product_ids = {row["product_id"] for row in pending}
     assert product_pending.id in product_ids
     assert product_reconciled.id not in product_ids
+
+
+# ────────────────────────────────────────────────────────────────────
+# 5) M1B-3b-COGS: توجيه فرق الطبقة المؤقّتة للقطات الثابتة إلى الفروقات
+# ────────────────────────────────────────────────────────────────────
+
+def _setup_variance_account(tenant, code="5109-VAR"):
+    return Account.objects.create(
+        tenant=tenant, code=code, name="فروقات تكلفة المبيعات",
+        account_type="Expense", is_active=True,
+    )
+
+
+def test_provisional_diff_standard_snapshot_routes_to_variance_account():
+    """T1: بيع بلقطة standard على صفر ثم استلام بكلفة مختلفة ⟵ قيد التسوية على الفروقات بلا سطر ت.ب.م."""
+    tenant = _make_tenant("ت1-ثابت")
+    _open_period(tenant, "2026", "2026-01-01", "2026-12-31")
+    product, inv_acct, cogs_acct = _make_product_with_accounts(tenant, "PROV-STD-1")
+    variance_acct = _setup_variance_account(tenant)
+    Product.objects.filter(pk=product.pk).update(avg_cost=Decimal("4"), standard_cost=Decimal("4"))
+    product.refresh_from_db()
+    SalesSettings.objects.update_or_create(
+        tenant=tenant,
+        defaults={"cogs_cost_method": "standard", "cost_variance_account": variance_acct},
+    )
+
+    sale_mv = record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("10"),
+        reference_type="SALE", reference_id=101, movement_date="2026-01-05", tenant=tenant,
+    )
+    assert sale_mv.cogs_method == "standard"
+    product.refresh_from_db()
+
+    in_mv = record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("5"), reference_type="PURCHASE_INVOICE", reference_id=102,
+        movement_date="2026-01-10", tenant=tenant,
+    )
+
+    journal = JournalHeader.objects.get(
+        tenant=tenant, reference_type="STOCK_PROVISIONAL_RECONCILE", reference_id=in_mv.id,
+    )
+    lines = {l.account_id: (l.debit, l.credit) for l in journal.lines.all()}
+    assert lines[variance_acct.id] == (Decimal("10.00"), Decimal("0.00"))
+    assert lines[inv_acct.id] == (Decimal("0.00"), Decimal("10.00"))
+    assert cogs_acct.id not in lines
+
+
+def test_provisional_diff_mixed_fifo_and_standard_layers_split_across_accounts():
+    """T2: طبقتان مؤقّتتان (fifo + standard) تسدّهما حركة استلام واحدة ⟵ قيد واحد يوزّع بين ت.ب.م والفروقات."""
+    tenant = _make_tenant("ت2-مختلط")
+    _open_period(tenant, "2026", "2026-01-01", "2026-12-31")
+    product, inv_acct, cogs_acct = _make_product_with_accounts(tenant, "PROV-MIX-1")
+    variance_acct = _setup_variance_account(tenant)
+    Product.objects.filter(pk=product.pk).update(avg_cost=Decimal("4"), standard_cost=Decimal("4"))
+    product.refresh_from_db()
+
+    SalesSettings.objects.update_or_create(
+        tenant=tenant, defaults={"cogs_cost_method": "fifo"},
+    )
+    mv_fifo = record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("4"),
+        reference_type="SALE", reference_id=201, movement_date="2026-01-05", tenant=tenant,
+    )
+    assert mv_fifo.cogs_method == "fifo"
+    product.refresh_from_db()
+
+    SalesSettings.objects.update_or_create(
+        tenant=tenant,
+        defaults={"cogs_cost_method": "standard", "cost_variance_account": variance_acct},
+    )
+    mv_std = record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("6"),
+        reference_type="SALE", reference_id=202, movement_date="2026-01-06", tenant=tenant,
+    )
+    assert mv_std.cogs_method == "standard"
+    product.refresh_from_db()
+
+    in_mv = record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("5"), reference_type="PURCHASE_INVOICE", reference_id=203,
+        movement_date="2026-01-10", tenant=tenant,
+    )
+
+    journals = JournalHeader.objects.filter(
+        tenant=tenant, reference_type="STOCK_PROVISIONAL_RECONCILE", reference_id=in_mv.id,
+    )
+    assert journals.count() == 1
+    journal = journals.get()
+    lines = {l.account_id: (l.debit, l.credit) for l in journal.lines.all()}
+    assert lines[cogs_acct.id] == (Decimal("4.00"), Decimal("0.00"))
+    assert lines[variance_acct.id] == (Decimal("6.00"), Decimal("0.00"))
+    assert lines[inv_acct.id] == (Decimal("0.00"), Decimal("10.00"))
+    assert sum(d for d, _ in lines.values()) == sum(c for _, c in lines.values())
+
+
+def test_provisional_diff_standard_without_variance_account_raises_and_rolls_back():
+    """T3: لقطة standard بلا حساب فروقات ⟵ استلام بفرق يرفع ValidationError ولا يحفظ حركة ولا قيداً."""
+    tenant = _make_tenant("ت3-ناقص")
+    _open_period(tenant, "2026", "2026-01-01", "2026-12-31")
+    product, _, _ = _make_product_with_accounts(tenant, "PROV-NOVAR-1")
+    Product.objects.filter(pk=product.pk).update(avg_cost=Decimal("4"), standard_cost=Decimal("4"))
+    product.refresh_from_db()
+    SalesSettings.objects.update_or_create(
+        tenant=tenant, defaults={"cogs_cost_method": "standard", "cost_variance_account": None},
+    )
+
+    record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("10"),
+        reference_type="SALE", reference_id=301, movement_date="2026-01-05", tenant=tenant,
+    )
+    product.refresh_from_db()
+
+    with pytest.raises(ValidationError) as exc:
+        record_stock_movement(
+            product=product, movement_type="IN", quantity=Decimal("10"),
+            unit_cost=Decimal("5"), reference_type="PURCHASE_INVOICE", reference_id=302,
+            movement_date="2026-01-10", tenant=tenant,
+        )
+
+    assert MISSING_COST_VARIANCE_ACCOUNT_ERROR in str(exc.value)
+    assert not JournalHeader.objects.filter(
+        tenant=tenant, reference_type="STOCK_PROVISIONAL_RECONCILE",
+    ).exists()
+    assert not StockMovement.objects.filter(
+        tenant=tenant, product=product, movement_type="IN",
+    ).exists()
+    provisional = StockLayer.objects.get(tenant=tenant, product=product, is_provisional=True)
+    assert provisional.reconciled_qty == Decimal("0.0000")
+
+
+def test_build_cogs_adjustment_lines_mixed_debits_then_credits():
+    from inventory.cogs_method import build_cogs_adjustment_lines
+
+    lines = build_cogs_adjustment_lines(
+        cogs_diff=Decimal("10"),
+        variance_diff=Decimal("-4"),
+        inv_diff=Decimal("6"),
+        cogs_account_id=1,
+        variance_account_id=2,
+        inv_account_id=3,
+        cogs_description="cogs",
+        variance_description="var",
+        inv_description="inv",
+    )
+    assert lines == [
+        {"account": 1, "debit": Decimal("10"), "credit": Decimal("0"), "description": "cogs"},
+        {"account": 2, "debit": Decimal("0"), "credit": Decimal("4"), "description": "var"},
+        {"account": 3, "debit": Decimal("0"), "credit": Decimal("6"), "description": "inv"},
+    ]
+
+
+def test_build_cogs_adjustment_lines_zero_inventory_omits_inventory_line():
+    from inventory.cogs_method import build_cogs_adjustment_lines
+
+    lines = build_cogs_adjustment_lines(
+        cogs_diff=Decimal("10"),
+        variance_diff=Decimal("-10"),
+        inv_diff=Decimal("0"),
+        cogs_account_id=1,
+        variance_account_id=2,
+        inv_account_id=3,
+        cogs_description="cogs",
+        variance_description="var",
+        inv_description="inv",
+    )
+    assert lines == [
+        {"account": 1, "debit": Decimal("10"), "credit": Decimal("0"), "description": "cogs"},
+        {"account": 2, "debit": Decimal("0"), "credit": Decimal("10"), "description": "var"},
+    ]
+
+
+def test_build_cogs_adjustment_lines_negative_cogs_debits_inventory_first():
+    from inventory.cogs_method import build_cogs_adjustment_lines
+
+    lines = build_cogs_adjustment_lines(
+        cogs_diff=Decimal("-5"),
+        variance_diff=Decimal("0"),
+        inv_diff=Decimal("-5"),
+        cogs_account_id=1,
+        variance_account_id=2,
+        inv_account_id=3,
+        cogs_description="cogs",
+        variance_description="var",
+        inv_description="inv",
+    )
+    assert lines == [
+        {"account": 3, "debit": Decimal("5"), "credit": Decimal("0"), "description": "inv"},
+        {"account": 1, "debit": Decimal("0"), "credit": Decimal("5"), "description": "cogs"},
+    ]
+
+
+def test_build_cogs_adjustment_lines_all_zero_returns_empty():
+    from inventory.cogs_method import build_cogs_adjustment_lines
+
+    assert build_cogs_adjustment_lines(
+        cogs_diff=Decimal("0"),
+        variance_diff=Decimal("0"),
+        inv_diff=Decimal("0"),
+        cogs_account_id=1,
+        variance_account_id=2,
+        inv_account_id=3,
+        cogs_description="cogs",
+        variance_description="var",
+        inv_description="inv",
+    ) == []

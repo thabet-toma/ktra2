@@ -12,9 +12,11 @@ from django.db import IntegrityError, transaction
 from django.db.models import OuterRef, Q, Subquery, Sum
 from django.core.exceptions import ValidationError
 
-from .cogs_method import apply_sale_cogs_snapshot, is_sale_issue, sync_fifo_snapshot
+from .cogs_method import (
+    FIXED_SNAPSHOT_METHODS, apply_sale_cogs_snapshot, build_cogs_adjustment_lines,
+    cost_variance_account_id, is_sale_issue, sync_fifo_snapshot,
+)
 from .models import (
-    COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD,
     Product, ProductFamily, ProductMerge, ProductStorageLocation, StockLayer,
     StockLayerConsumption, StockLayerRestoration, StockMovement,
 )
@@ -138,11 +140,8 @@ def family_display_name(family, family_id=None) -> str:
     return f'عائلة #{family_id}' if family_id else ''
 
 
-FIXED_COGS_METHODS = (COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE)
-
-
 def _has_fixed_cogs_snapshot(origin):
-    return origin.cogs_method in FIXED_COGS_METHODS and origin.cogs_cost is not None
+    return origin.cogs_method in FIXED_SNAPSHOT_METHODS and origin.cogs_cost is not None
 
 
 def _cumulative_cogs(origin, qty):
@@ -775,11 +774,13 @@ def _post_provisional_reconciliation_diff(*, movement, prod, real_unit_cost, det
 
     المبلغ = Σ (الكلفة الحقيقية − الكلفة المؤقّتة) × الكمية المسدودة، عبر كل
     طبقةٍ شاركت في السدّ (`details`، من `inventory.fifo.reconcile_provisional`).
+    يُوجَّه فرق الطبقات ذات اللقطة الثابتة (`standard`/`last_purchase`) إلى حساب
+    فروقات تكلفة المبيعات، والباقي إلى ت.ب.م، والمخزون بالمجموع.
 
     الاتجاه — نظير `post_stocktake` بالضبط:
       الحقيقية أعلى من المخمَّنة (ت.ب.م سُجِّلت وقت البيع أقلّ من الحقيقة):
-        مدين ت.ب.م / دائن المخزون بالفرق.
-      الحقيقية أقلّ من المخمَّنة: العكس — مدين المخزون / دائن ت.ب.م.
+        مدين ت.ب.م / فروقات، دائن المخزون بالفرق.
+      الحقيقية أقلّ من المخمَّنة: العكس — مدين المخزون / دائن ت.ب.م / فروقات.
 
     **بلا فحص فترة البيعة الأصلية إطلاقاً** — قرارُ مالكٍ محسوم (#136): التاريخ
     هو تاريخ حركة الورود دائماً (`movement.movement_date`)، و`post_journal`
@@ -792,28 +793,36 @@ def _post_provisional_reconciliation_diff(*, movement, prod, real_unit_cost, det
 
     from accounting.services import post_journal
 
-    total_diff = Decimal('0')
+    total_raw = Decimal('0')
+    variance_raw = Decimal('0')
     for d in details:
-        total_diff += (real_unit_cost - d.provisional_unit_cost) * d.filled_qty
-    total_diff = total_diff.quantize(Decimal('0.01'))
-    if total_diff == 0:
+        diff = (real_unit_cost - d.provisional_unit_cost) * d.filled_qty
+        total_raw += diff
+        if d.cogs_method in FIXED_SNAPSHOT_METHODS:
+            variance_raw += diff
+    total_diff = total_raw.quantize(Decimal('0.01'))
+    variance_diff = variance_raw.quantize(Decimal('0.01'))
+    cogs_diff = total_diff - variance_diff
+    if not total_diff and not variance_diff:
         return None
 
-    inv_acct = _resolve_line_account(prod, 'inventory', tenant_id=movement.tenant_id)
-    cogs_acct = _resolve_line_account(prod, 'cogs', tenant_id=movement.tenant_id)
-    amount = abs(total_diff)
+    inv_acct = _resolve_line_account(prod, 'inventory', tenant_id=movement.tenant_id) if total_diff else None
+    cogs_acct = _resolve_line_account(prod, 'cogs', tenant_id=movement.tenant_id) if cogs_diff else None
+    variance_acct_id = cost_variance_account_id(movement.tenant_id) if variance_diff else None
     description = f"فرق تسوية طبقة مؤقّتة — حركة استلام #{movement.id}"
+    variance_desc = f"فروقات تكلفة المبيعات — حركة استلام #{movement.id}"
 
-    if total_diff > 0:
-        lines_data = [
-            {'account': cogs_acct.id, 'debit': amount, 'credit': Decimal('0'), 'description': description},
-            {'account': inv_acct.id, 'debit': Decimal('0'), 'credit': amount, 'description': description},
-        ]
-    else:
-        lines_data = [
-            {'account': inv_acct.id, 'debit': amount, 'credit': Decimal('0'), 'description': description},
-            {'account': cogs_acct.id, 'debit': Decimal('0'), 'credit': amount, 'description': description},
-        ]
+    lines_data = build_cogs_adjustment_lines(
+        cogs_diff=cogs_diff,
+        variance_diff=variance_diff,
+        inv_diff=total_diff,
+        cogs_account_id=cogs_acct.id if cogs_acct else None,
+        variance_account_id=variance_acct_id,
+        inv_account_id=inv_acct.id if inv_acct else None,
+        cogs_description=description,
+        variance_description=variance_desc,
+        inv_description=description,
+    )
 
     return post_journal(
         tenant_id=movement.tenant_id,
@@ -2447,8 +2456,9 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
 
     يعيد تقييم حركات البيع (movement_type=OUT, reference_type=SALE) بالمتوسط الجديد
     (فيصبح تقرير أرباح الفواتير صحيحاً لأنه يقرأ total_cost للحركة)، ويُرحّل **قيد
-    تسوية واحداً** بفرق التكلفة (مدين ت.ب.م / دائن المخزون عند الزيادة، والعكس عند
-    النقص) فتصبح قائمة الدخل صحيحة. يعالج حالة البيع قبل وصول الشراء (COGS=0).
+    تسوية واحداً** بفرق التكلفة: حصة الحركات ذات اللقطة الثابتة (`standard`/`last_purchase`)
+    تذهب إلى حساب فروقات تكلفة المبيعات، والباقي إلى ت.ب.م، والمخزون بالمجموع الكلّي
+    فتصبح قائمة الدخل صحيحة. يعالج حالة البيع قبل وصول الشراء (COGS=0).
 
     apply=False ⇒ معاينة فقط (لا تعديل). idempotent: تشغيل ثانٍ لا فرق فيه ⇒ لا قيد.
     """
@@ -2464,11 +2474,20 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
     old_cogs = sum((Decimal(str(m.total_cost or 0)) for m in out_moves), Decimal('0')).quantize(Decimal('0.01'))
     new_cogs = sum((Decimal(str(m.quantity or 0)) * avg for m in out_moves), Decimal('0')).quantize(Decimal('0.01'))
     diff = (new_cogs - old_cogs).quantize(Decimal('0.01'))
+    variance_diff = sum(
+        (
+            (Decimal(str(m.quantity or 0)) * avg).quantize(Decimal('0.01')) - Decimal(str(m.total_cost or 0))
+            for m in out_moves if m.cogs_method in FIXED_SNAPSHOT_METHODS
+        ),
+        Decimal('0'),
+    ).quantize(Decimal('0.01'))
+    cogs_diff = diff - variance_diff
 
     result = {
         'product_id': product_id, 'average_cost': str(avg),
         'sold_moves': len(out_moves), 'old_cogs': str(old_cogs),
         'new_cogs': str(new_cogs), 'diff': str(diff),
+        'variance_diff': str(variance_diff),
         'applied': False, 'journal_id': None,
     }
     if not apply or bd['invoice_count'] == 0:
@@ -2476,6 +2495,7 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
 
     p = Product.objects.get(id=product_id, tenant_id=tenant_id)
     with transaction.atomic():
+        variance_acct_id = cost_variance_account_id(tenant_id) if variance_diff else None
         for m in out_moves:
             q = Decimal(str(m.quantity or 0))
             m.unit_cost = avg
@@ -2488,20 +2508,20 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
         p.avg_cost = avg
         p.save(update_fields=['avg_cost'])
         journal = None
-        if diff != 0:
-            cogs_acct = _resolve_line_account(p, 'cogs', tenant_id=tenant_id)
-            inv_acct = _resolve_line_account(p, 'inventory', tenant_id=tenant_id)
-            if diff > 0:
-                lines_data = [
-                    {'account': cogs_acct.id, 'debit': diff, 'credit': Decimal('0'), 'description': 'تسوية ت.ب.م'},
-                    {'account': inv_acct.id, 'debit': Decimal('0'), 'credit': diff, 'description': 'تسوية مخزون'},
-                ]
-            else:
-                amt = -diff
-                lines_data = [
-                    {'account': inv_acct.id, 'debit': amt, 'credit': Decimal('0'), 'description': 'تسوية مخزون'},
-                    {'account': cogs_acct.id, 'debit': Decimal('0'), 'credit': amt, 'description': 'تسوية ت.ب.م'},
-                ]
+        if diff or variance_diff:
+            cogs_acct = _resolve_line_account(p, 'cogs', tenant_id=tenant_id) if cogs_diff else None
+            inv_acct = _resolve_line_account(p, 'inventory', tenant_id=tenant_id) if diff else None
+            lines_data = build_cogs_adjustment_lines(
+                cogs_diff=cogs_diff,
+                variance_diff=variance_diff,
+                inv_diff=diff,
+                cogs_account_id=cogs_acct.id if cogs_acct else None,
+                variance_account_id=variance_acct_id,
+                inv_account_id=inv_acct.id if inv_acct else None,
+                cogs_description='تسوية ت.ب.م',
+                variance_description='فروقات تكلفة المبيعات',
+                inv_description='تسوية مخزون',
+            )
             # تاريخ التسوية = آخر تاريخ بيع (ضمن فترة البيانات/الفترة المحاسبية المفتوحة).
             sale_dates = [m.movement_date for m in out_moves if m.movement_date]
             txn_date = max(sale_dates) if sale_dates else timezone.localdate()

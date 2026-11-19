@@ -19,11 +19,12 @@ import pytest
 from django.contrib.auth.models import User
 from django.db.models import F, Sum
 
-from accounting.models import Account, FiscalPeriod, JournalHeader
+from accounting.models import Account, FiscalPeriod, JournalHeader, JournalLine
 from inventory.models import (
     Product, ProductCategory, StockLayer, StockLayerReconciliation, StockMovement,
 )
 from inventory.services import record_stock_movement, reverse_stock_movements
+from sales.models import SalesSettings
 from tenants.services import create_company
 
 pytestmark = pytest.mark.django_db
@@ -149,4 +150,40 @@ def test_a_reconciliation_recorded_before_the_ledger_existed_is_still_reversed(p
     provisional = StockLayer.objects.get(product=product, is_provisional=True)
     assert provisional.reconciled_qty == Decimal("0.0000")
     assert _recon_journals(product).count() == 0
+    _assert_invariant(product)
+
+
+def test_unposting_receipt_removes_variance_reconciliation_journal(product):
+    """T4: إلغاء ترحيل الاستلام يحذف قيد التسوية الذي يحمل سطر فروقات التكلفة."""
+    tenant = product.tenant
+    variance = Account.objects.create(
+        tenant=tenant, code="5109-UR", name="فروقات تكلفة المبيعات",
+        account_type="Expense", is_active=True,
+    )
+    Product.objects.filter(pk=product.pk).update(avg_cost=Decimal("4"), standard_cost=Decimal("4"))
+    product.refresh_from_db()
+    SalesSettings.objects.update_or_create(
+        tenant=tenant,
+        defaults={"cogs_cost_method": "standard", "cost_variance_account": variance},
+    )
+
+    sale = record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("10"),
+        reference_type="SALE", reference_id=910, movement_date="2026-01-05", tenant=tenant,
+    )
+    assert sale.cogs_method == "standard"
+    product.refresh_from_db()
+
+    receipt = _receive(product, "10", "5", ref=911)
+    journals = _recon_journals(product)
+    assert journals.count() == 1
+    assert JournalLine.objects.filter(journal=journals.get(), account=variance, debit=Decimal("10.00")).exists()
+
+    _unpost(product, 911)
+
+    assert _recon_journals(product).count() == 0
+    assert not JournalLine.objects.filter(tenant=tenant, account=variance).exists()
+    provisional = StockLayer.objects.get(product=product, is_provisional=True)
+    assert provisional.reconciled_qty == Decimal("0.0000")
+    assert not StockLayerReconciliation.objects.filter(movement=receipt).exists()
     _assert_invariant(product)

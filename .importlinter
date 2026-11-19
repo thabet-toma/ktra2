@@ -231,6 +231,7 @@ ignore_imports =
     inventory.tests.* -> logistics.services
     inventory.tests.* -> sales.models
     inventory.tests.* -> sales.services
+    inventory.cogs_method -> sales.models
     inventory.serials -> logistics.models
     inventory.serials -> sales.models
     inventory.services -> logistics.models

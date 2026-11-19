@@ -283,11 +283,13 @@ class ReconcileDetail(NamedTuple):
     `provisional_unit_cost` هي الكلفة المخمَّنة التي حُمِّلت وقت البيع على
     المخزون السالب؛ الفرق بينها وبين الكلفة الحقيقية (التي يعرفها المستدعي)
     هو أساس قيد الفرق — هذه الدالة لا تحسبه، فقط تُرجع التفصيل الخام.
+    `cogs_method` هي طريقة تكلفة حركة البيع مصدر الطبقة وتحدّد التوجيه بين ت.ب.م وحساب الفروقات.
     """
 
     layer_id: int
     filled_qty: Decimal
     provisional_unit_cost: Decimal
+    cogs_method: str | None
 
 
 class ReconcileResult(NamedTuple):
@@ -332,6 +334,16 @@ def reconcile_provisional(*, movement: StockMovement, quantity, unit_cost) -> Re
             .filter(reconciled_qty__lt=F("original_qty"))
             .order_by("layer_date", "id")
         )
+        src_ids = {
+            layer.source_movement_id for layer in provisional_layers if layer.source_movement_id
+        }
+        methods_by_mv = (
+            dict(
+                StockMovement.objects.filter(tenant_id=movement.tenant_id, pk__in=src_ids)
+                .values_list("pk", "cogs_method")
+            )
+            if src_ids else {}
+        )
         remaining = quantity
         details: list[ReconcileDetail] = []
         for layer in provisional_layers:
@@ -354,6 +366,7 @@ def reconcile_provisional(*, movement: StockMovement, quantity, unit_cost) -> Re
                     layer_id=layer.pk,
                     filled_qty=filled,
                     provisional_unit_cost=layer.unit_cost,
+                    cogs_method=methods_by_mv.get(layer.source_movement_id),
                 )
             )
             remaining -= filled

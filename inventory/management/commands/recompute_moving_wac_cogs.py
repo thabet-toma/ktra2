@@ -9,9 +9,10 @@
   - كل حركة بيع (OUT/SALE): التكلفة = الكمية × المتوسط **لحظتها** (لا يتغيّر المتوسط).
 
 يحدّث `StockMovement.total_cost` لحركات البيع (مصدر تقرير أرباح الفواتير) و
-`Product.avg_cost` النهائي، ويُرحّل **قيد تسوية إجمالي واحد** بفرق ت.ب.م الكلي
-(مدين 5101 / دائن 1104 عند الزيادة، والعكس عند النقص) فتبقى قائمة الدخل والميزانية
-متوازنة.
+`Product.avg_cost` النهائي، ويُرحّل **قيد تسوية إجمالي واحد** يوجّه حصة الحركات
+ذات اللقطة الثابتة (`standard`/`last_purchase`) إلى حساب فروقات تكلفة المبيعات،
+والباقي إلى ت.ب.م (5101)، والمخزون (1104) بالمجموع الكلّي، فتبقى قائمة الدخل
+والميزانية متوازنة.
 
 افتراضياً **معاينة فقط** (لا تعديل). --apply للتنفيذ. خاص بشركة «الجرابعه».
 """
@@ -22,11 +23,15 @@ import datetime
 from decimal import Decimal
 from pathlib import Path
 
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from inventory.cogs_method import sync_fifo_snapshot
+from inventory.cogs_method import (
+    FIXED_SNAPSHOT_METHODS, MISSING_COST_VARIANCE_ACCOUNT_ERROR,
+    build_cogs_adjustment_lines, cost_variance_account_id, sync_fifo_snapshot,
+)
 
 DEC = Decimal("0.01")
 Q4 = Decimal("0.0001")
@@ -90,6 +95,7 @@ class Command(BaseCommand):
 
         total_old = Decimal('0')
         total_new = Decimal('0')
+        variance_raw = Decimal('0')
         changed_moves = []      # (movement_id, new_total_cost)
         product_final_avg = {}  # product_id -> final avg
         inv917_old = inv917_new = None
@@ -104,7 +110,7 @@ class Command(BaseCommand):
                 StockMovement.objects.filter(tenant_id=tid, product_id=p.id)
                 .order_by('movement_date', 'id')
                 .only('id', 'movement_type', 'reference_type', 'reference_id',
-                      'quantity', 'unit_cost', 'total_cost')
+                      'quantity', 'unit_cost', 'total_cost', 'cogs_method')
             )
             if not moves:
                 continue
@@ -126,6 +132,8 @@ class Command(BaseCommand):
                         old_tc = Decimal(str(m.total_cost or 0))
                         total_old += old_tc
                         total_new += new_tc
+                        if m.cogs_method in FIXED_SNAPSHOT_METHODS:
+                            variance_raw += (new_tc - old_tc)
                         if new_tc != old_tc:
                             changed_moves.append((m.id, new_tc))
                         if inv917_id and m.reference_id == inv917_id:
@@ -135,11 +143,15 @@ class Command(BaseCommand):
             product_final_avg[p.id] = avg.quantize(Q4)
 
         delta = (total_new - total_old).quantize(DEC)
+        variance_delta = variance_raw.quantize(DEC)
+        cogs_delta = delta - variance_delta
         self.stdout.write(self.style.WARNING(
             f'\n=== نتيجة {"التنفيذ" if apply else "المعاينة"} ==='))
         self.stdout.write(f'  ت.ب.م القديمة (لقطة AverageCost) = {total_old.quantize(DEC)}')
         self.stdout.write(f'  ت.ب.م الجديدة (متوسط متحرك لحظة البيع) = {total_new.quantize(DEC)}')
         self.stdout.write(f'  الفرق (Δ) = {delta}  ({"زيادة تكلفة ⇒ ربح أقل" if delta>0 else "نقص تكلفة ⇒ ربح أكثر"})')
+        self.stdout.write(f'  حصة ت.ب.م = {cogs_delta}')
+        self.stdout.write(f'  حصة فروقات تكلفة المبيعات = {variance_delta}')
         self.stdout.write(f'  حركات بيع ستتغيّر = {len(changed_moves)}')
         if inv917_new is not None:
             rev = Decimal(str(inv917.subtotal_excl_tax - inv917.invoice_discount))
@@ -151,6 +163,13 @@ class Command(BaseCommand):
         if not apply:
             self.stdout.write(self.style.SUCCESS('\n[معاينة فقط — لم يُعدَّل شيء. أضف --apply للتنفيذ.]'))
             return
+
+        variance_account_id = None
+        if variance_delta != 0:
+            try:
+                variance_account_id = cost_variance_account_id(tid)
+            except ValidationError as exc:
+                raise CommandError(MISSING_COST_VARIANCE_ACCOUNT_ERROR) from exc
 
         # ── التنفيذ ──
         with transaction.atomic():
@@ -165,20 +184,20 @@ class Command(BaseCommand):
                 Product.objects.filter(id=pid).update(avg_cost=avg)
             # قيد تسوية إجمالي لفرق ت.ب.م
             journal = None
-            if delta != 0:
-                cogs = Account.objects.get(tenant_id=tid, code='5101')
-                invacc = Account.objects.get(tenant_id=tid, code='1104')
-                amt = abs(delta)
-                if delta > 0:
-                    lines = [
-                        {'account': cogs.id, 'debit': amt, 'credit': Decimal('0'), 'description': 'تسوية ت.ب.م (متوسط متحرك)'},
-                        {'account': invacc.id, 'debit': Decimal('0'), 'credit': amt, 'description': 'تسوية مخزون (متوسط متحرك)'},
-                    ]
-                else:
-                    lines = [
-                        {'account': invacc.id, 'debit': amt, 'credit': Decimal('0'), 'description': 'تسوية مخزون (متوسط متحرك)'},
-                        {'account': cogs.id, 'debit': Decimal('0'), 'credit': amt, 'description': 'تسوية ت.ب.م (متوسط متحرك)'},
-                    ]
+            if delta != 0 or variance_delta != 0:
+                cogs = Account.objects.get(tenant_id=tid, code='5101') if cogs_delta != 0 else None
+                invacc = Account.objects.get(tenant_id=tid, code='1104') if delta != 0 else None
+                lines = build_cogs_adjustment_lines(
+                    cogs_diff=cogs_delta,
+                    variance_diff=variance_delta,
+                    inv_diff=delta,
+                    cogs_account_id=cogs.id if cogs else None,
+                    variance_account_id=variance_account_id,
+                    inv_account_id=invacc.id if invacc else None,
+                    cogs_description='تسوية ت.ب.م (متوسط متحرك)',
+                    variance_description='فروقات تكلفة المبيعات (متوسط متحرك)',
+                    inv_description='تسوية مخزون (متوسط متحرك)',
+                )
                 last = (StockMovement.objects.filter(tenant_id=tid, reference_type='SALE')
                         .order_by('-movement_date').values_list('movement_date', flat=True).first())
                 txn_date = last or timezone.localdate()

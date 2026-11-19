@@ -3,10 +3,12 @@ from io import StringIO
 
 import pytest
 from django.core.management import call_command
+from django.core.management.base import CommandError
 
-from accounting.models import Account, JournalLine
+from accounting.models import Account, JournalHeader, JournalLine
+from inventory.cogs_method import MISSING_COST_VARIANCE_ACCOUNT_ERROR
 from inventory.models import Product, StockLayer, StockMovement
-from inventory.services import product_display_name, record_stock_movement
+from inventory.services import _resolve_line_account, product_display_name, record_stock_movement
 from inventory.tests.test_unpost_provisional_reconciliation import _receive
 from logistics.tests.test_accrual_adjust import D as LD, _AccrualAdjustBase
 from sales.models import SalesInvoice, SalesSettings
@@ -190,11 +192,130 @@ def test_reconcile_syncs_only_fifo(env, method, expected):
     tenant, cur, customer, product, ss = setup_purchase_case(env, method, Decimal('11'))
     invoice = _sell(tenant, cur, customer, product, 10, 'RECON')
     movement = StockMovement.objects.get(reference_type='SALE', reference_id=invoice.id)
+    if method != 'fifo':
+        ss.cogs_cost_method = 'fifo'
+        ss.save(update_fields=['cogs_cost_method'])
     with patch('inventory.services.product_cost_breakdown', return_value={'average_cost': '12', 'invoice_count': 1}):
-        reconcile_product_cogs(tenant_id=tenant.pk, product_id=product.id, apply=True)
+        res = reconcile_product_cogs(tenant_id=tenant.pk, product_id=product.id, apply=True)
     movement.refresh_from_db()
     assert movement.total_cost == Decimal('120')
     assert movement.cogs_cost == expected
+    journal = JournalHeader.objects.get(pk=res['journal_id'])
+    lines = {l.account_id: (l.debit, l.credit) for l in journal.lines.all()}
+    if method == 'fifo':
+        assert res['variance_diff'] == '0.00'
+        assert lines[ss.default_cogs_account_id] == (Decimal('8.00'), Decimal('0.00'))
+        assert ss.cost_variance_account_id not in lines
+    else:
+        assert res['variance_diff'] == '8.00'
+        assert lines[ss.cost_variance_account_id] == (Decimal('8.00'), Decimal('0.00'))
+        assert ss.default_cogs_account_id not in lines
+        assert sum(d for d, _ in lines.values()) == sum(c for _, c in lines.values())
+    assert lines[ss.default_inventory_account_id] == (Decimal('0.00'), Decimal('8.00'))
+
+
+def test_reconcile_mixed_fifo_and_standard_splits_journal(env):
+    from unittest.mock import patch
+    from inventory.services import reconcile_product_cogs
+
+    tenant, cur, customer, product, ss = setup_purchase_case(env, 'fifo', Decimal('11'))
+    sale_fifo = _sell(tenant, cur, customer, product, 6, 'RECON-MIX-FIFO')
+    mv_fifo = StockMovement.objects.get(reference_type='SALE', reference_id=sale_fifo.id, product=product)
+    assert mv_fifo.cogs_method == 'fifo'
+    fifo_old_total = mv_fifo.total_cost
+
+    ss.cogs_cost_method = 'standard'
+    ss.save(update_fields=['cogs_cost_method'])
+    sale_std = _sell(tenant, cur, customer, product, 4, 'RECON-MIX-STD')
+    mv_std = StockMovement.objects.get(reference_type='SALE', reference_id=sale_std.id, product=product)
+    assert mv_std.cogs_method == 'standard'
+    std_old_total = mv_std.total_cost
+    std_old_cogs = mv_std.cogs_cost
+
+    ss.cogs_cost_method = 'fifo'
+    ss.save(update_fields=['cogs_cost_method'])
+
+    with patch('inventory.services.product_cost_breakdown', return_value={'average_cost': '12', 'invoice_count': 1}):
+        res = reconcile_product_cogs(tenant_id=tenant.pk, product_id=product.id, apply=True)
+
+    mv_fifo.refresh_from_db()
+    mv_std.refresh_from_db()
+    assert mv_fifo.total_cost == Decimal('72.00')
+    assert mv_fifo.total_cost != fifo_old_total
+    assert mv_fifo.cogs_cost == mv_fifo.total_cost
+    assert mv_std.total_cost == Decimal('48.00')
+    assert mv_std.total_cost != std_old_total
+    assert mv_std.cogs_cost == std_old_cogs
+
+    diff_dec = Decimal(res['diff'])
+    var_dec = Decimal(res['variance_diff'])
+    cogs_dec = diff_dec - var_dec
+    assert var_dec == (mv_std.total_cost - std_old_total).quantize(Decimal('0.01'))
+    assert cogs_dec != 0 and var_dec != 0
+
+    journal = JournalHeader.objects.get(pk=res['journal_id'])
+    assert journal.reference_type == 'COGS_RECONCILE'
+    lines = {l.account_id: (l.debit, l.credit) for l in journal.lines.all()}
+    assert lines[ss.default_cogs_account_id] == (
+        (cogs_dec, Decimal('0.00')) if cogs_dec > 0 else (Decimal('0.00'), -cogs_dec)
+    )
+    assert lines[ss.cost_variance_account_id] == (
+        (var_dec, Decimal('0.00')) if var_dec > 0 else (Decimal('0.00'), -var_dec)
+    )
+    assert lines[ss.default_inventory_account_id] == (
+        (Decimal('0.00'), diff_dec) if diff_dec > 0 else (-diff_dec, Decimal('0.00'))
+    )
+    assert sum(d for d, _ in lines.values()) == sum(c for _, c in lines.values())
+
+
+def test_reconcile_cogs_skips_missing_variance_account_product_and_continues(env):
+    from unittest.mock import patch
+
+    tenant, cur, customer, _ = env
+    variance = Account.objects.create(tenant=tenant, code='5100-RECON-VAR', name='variance', account_type='Expense')
+    ss = SalesSettings.objects.get(tenant=tenant)
+
+    prod_b = Product.objects.create(
+        tenant=tenant, sku='REC-STD-B', name_ar='std-b', standard_cost=Decimal('11'),
+    )
+    _receive(prod_b, '8', '10', 2001, date='2026-06-10')
+    _receive(prod_b, '4', '16', 2002, date='2026-06-12')
+    ss.cogs_cost_method = 'standard'
+    ss.cost_variance_account = variance
+    ss.save(update_fields=['cogs_cost_method', 'cost_variance_account'])
+    sale_b = _sell(tenant, cur, customer, prod_b, 10, 'REC-B')
+    mv_b = StockMovement.objects.get(reference_type='SALE', reference_id=sale_b.id, product=prod_b)
+    assert mv_b.cogs_method == 'standard'
+    assert mv_b.total_cost == Decimal('112.00')
+
+    prod_a = Product.objects.create(tenant=tenant, sku='REC-FIFO-A', name_ar='fifo-a')
+    _receive(prod_a, '8', '10', 2003, date='2026-06-10')
+    _receive(prod_a, '4', '16', 2004, date='2026-06-12')
+    ss.cogs_cost_method = 'fifo'
+    ss.save(update_fields=['cogs_cost_method'])
+    sale_a = _sell(tenant, cur, customer, prod_a, 10, 'REC-A')
+    mv_a = StockMovement.objects.get(reference_type='SALE', reference_id=sale_a.id, product=prod_a)
+    assert mv_a.cogs_method == 'fifo'
+    assert mv_a.total_cost == Decimal('112.00')
+
+    ss.cost_variance_account = None
+    ss.save(update_fields=['cost_variance_account'])
+
+    out = StringIO()
+    with patch('inventory.services.product_cost_breakdown', return_value={'average_cost': '12', 'invoice_count': 1}):
+        call_command('reconcile_cogs', '--apply', '--tenant', tenant.pk, stdout=out)
+
+    output = out.getvalue()
+    assert prod_b.sku in output
+    assert MISSING_COST_VARIANCE_ACCOUNT_ERROR in output
+    assert JournalHeader.objects.filter(
+        tenant=tenant, reference_type='COGS_RECONCILE', reference_id=prod_a.id,
+    ).exists()
+    assert not JournalHeader.objects.filter(
+        tenant=tenant, reference_type='COGS_RECONCILE', reference_id=prod_b.id,
+    ).exists()
+    mv_b.refresh_from_db()
+    assert mv_b.total_cost == Decimal('112.00')
 
 
 def test_method_unit_cost_is_tenant_scoped_and_breaks_date_ties(env):
@@ -363,16 +484,50 @@ def test_recompute_moving_wac_syncs_only_fifo(env, tmp_path, method, standard_co
     tenant, cur, customer, product, ss = setup_purchase_case(env, method, standard_cost)
     tenant.CompanyName = 'الجرابعه'
     tenant.save(update_fields=['CompanyName'])
-    Account.objects.get_or_create(tenant=tenant, code='5101', defaults={'name': 'cogs', 'account_type': 'Expense'})
-    Account.objects.get_or_create(tenant=tenant, code='1104', defaults={'name': 'inv', 'account_type': 'Asset'})
+    cogs_5101, _ = Account.objects.get_or_create(tenant=tenant, code='5101', defaults={'name': 'cogs', 'account_type': 'Expense'})
+    inv_1104, _ = Account.objects.get_or_create(tenant=tenant, code='1104', defaults={'name': 'inv', 'account_type': 'Asset'})
     invoice = _sell(tenant, cur, customer, product, 10, f'WAC-{method}')
     movement = StockMovement.objects.get(reference_type='SALE', reference_id=invoice.id, product=product)
     assert movement.total_cost == Decimal('112.00')
+    if method == 'standard':
+        preview_out = StringIO()
+        call_command('recompute_moving_wac_cogs', csv_dir=str(tmp_path), tenant_id=tenant.pk, stdout=preview_out)
+        assert any('فروقات' in line and '8.00' in line for line in preview_out.getvalue().splitlines())
     call_command('recompute_moving_wac_cogs', csv_dir=str(tmp_path), tenant_id=tenant.pk, apply=True, stdout=StringIO())
     movement.refresh_from_db()
     assert movement.total_cost == Decimal('120.00')
     assert movement.cogs_cost == expected_cogs
     assert movement.cogs_method == method
+    journal = JournalHeader.objects.get(tenant=tenant, reference_type='COGS_MOVING_WAC', reference_id=tenant.pk)
+    lines = {l.account_id: (l.debit, l.credit) for l in journal.lines.all()}
+    if method == 'fifo':
+        assert lines[cogs_5101.id] == (Decimal('8.00'), Decimal('0.00'))
+        assert ss.cost_variance_account_id not in lines
+    else:
+        assert lines[ss.cost_variance_account_id] == (Decimal('8.00'), Decimal('0.00'))
+        assert cogs_5101.id not in lines
+    assert lines[inv_1104.id] == (Decimal('0.00'), Decimal('8.00'))
+
+
+def test_recompute_moving_wac_standard_without_variance_account_raises_and_writes_nothing(env, tmp_path):
+    tenant, cur, customer, product, ss = setup_purchase_case(env, 'standard', Decimal('11'))
+    tenant.CompanyName = 'الجرابعه'
+    tenant.save(update_fields=['CompanyName'])
+    Account.objects.get_or_create(tenant=tenant, code='5101', defaults={'name': 'cogs', 'account_type': 'Expense'})
+    Account.objects.get_or_create(tenant=tenant, code='1104', defaults={'name': 'inv', 'account_type': 'Asset'})
+    invoice = _sell(tenant, cur, customer, product, 10, 'WAC-NOVAR')
+    movement = StockMovement.objects.get(reference_type='SALE', reference_id=invoice.id, product=product)
+    ss.cost_variance_account = None
+    ss.save(update_fields=['cost_variance_account'])
+    before_journals = JournalHeader.objects.filter(tenant=tenant, reference_type='COGS_MOVING_WAC').count()
+
+    with pytest.raises(CommandError) as exc:
+        call_command('recompute_moving_wac_cogs', csv_dir=str(tmp_path), tenant_id=tenant.pk, apply=True, stdout=StringIO())
+
+    assert MISSING_COST_VARIANCE_ACCOUNT_ERROR in str(exc.value)
+    movement.refresh_from_db()
+    assert movement.total_cost == Decimal('112.00')
+    assert JournalHeader.objects.filter(tenant=tenant, reference_type='COGS_MOVING_WAC').count() == before_journals
 
 
 class LandedRevaluationSnapshotSyncTest(_AccrualAdjustBase):
@@ -391,13 +546,73 @@ class LandedRevaluationSnapshotSyncTest(_AccrualAdjustBase):
     def test_landed_revaluation_keeps_fixed_snapshot(self):
         self._invoice()
         Product.objects.filter(pk=self.product.pk).update(standard_cost=LD('500'))
-        SalesSettings.objects.update_or_create(tenant=self.tenant, defaults={'cogs_cost_method': 'standard'})
+        variance = Account.objects.create(
+            tenant=self.tenant, code='5109-REV', name='فروقات تكلفة المبيعات',
+            account_type='Expense', is_active=True,
+        )
+        SalesSettings.objects.update_or_create(
+            tenant=self.tenant,
+            defaults={'cogs_cost_method': 'standard', 'cost_variance_account': variance},
+        )
         sale = self._sell('4')
         sale_cost_before = sale.total_cost
         self.assertEqual((sale.cogs_method, sale.cogs_cost), ('standard', LD('2000.00')))
+        SalesSettings.objects.filter(tenant=self.tenant).update(cogs_cost_method='fifo')
         res = self._adjust_clearance(900)
         self.assertEqual(res.status_code, 200, res.content)
         sale.refresh_from_db()
         self.assertEqual(sale.total_cost, sale_cost_before + LD('120.00'))
         self.assertEqual(sale.cogs_cost, LD('2000.00'))
         self.assertEqual(sale.cogs_method, 'standard')
+        [reval] = res.data['revaluations']
+        self.assertEqual(reval['variance'], '120.00')
+        self.assertEqual(reval['cogs'], '0.00')
+        journal = JournalHeader.objects.get(pk=reval['journal_id'])
+        cogs_acct = _resolve_line_account(self.product, 'cogs', tenant_id=self.tenant.TenantID)
+        self.assertTrue(JournalLine.objects.filter(journal=journal, account=variance, debit=LD('120.00')).exists())
+        self.assertFalse(JournalLine.objects.filter(journal=journal, account=cogs_acct).exists())
+
+    def test_landed_revaluation_fixed_without_variance_account_fails_preview_and_apply(self):
+        self._invoice()
+        Product.objects.filter(pk=self.product.pk).update(standard_cost=LD('500'))
+        SalesSettings.objects.update_or_create(
+            tenant=self.tenant,
+            defaults={'cogs_cost_method': 'standard', 'cost_variance_account': None},
+        )
+        sale = self._sell('4')
+        sale_cost_before = sale.total_cost
+        journals_before = JournalHeader.objects.filter(tenant=self.tenant).count()
+
+        for extra in ({'preview': True}, {}):
+            res = self._adjust_clearance(900, **extra)
+            self.assertEqual(res.status_code, 400, res.content)
+            self.assertIn(MISSING_COST_VARIANCE_ACCOUNT_ERROR, res.data['error'])
+
+        sale.refresh_from_db()
+        self.assertEqual(sale.total_cost, sale_cost_before)
+        self.assertEqual(JournalHeader.objects.filter(tenant=self.tenant).count(), journals_before)
+
+    def test_landed_revaluation_reconciled_provisional_fixed_routes_to_variance(self):
+        variance = Account.objects.create(
+            tenant=self.tenant, code='5109-REC', name='فروقات تكلفة المبيعات',
+            account_type='Expense', is_active=True,
+        )
+        Product.objects.filter(pk=self.product.pk).update(standard_cost=LD('500'), avg_cost=LD('500'))
+        SalesSettings.objects.update_or_create(
+            tenant=self.tenant,
+            defaults={'cogs_cost_method': 'standard', 'cost_variance_account': variance},
+        )
+        sale = self._sell('4')
+        self.assertEqual(sale.cogs_method, 'standard')
+        self._invoice()
+
+        res = self._adjust_clearance(900)
+        self.assertEqual(res.status_code, 200, res.content)
+        [reval] = res.data['revaluations']
+        self.assertEqual(reval['variance'], '120.00')
+        self.assertEqual(reval['cogs'], '0.00')
+        self.assertEqual(reval['inventory'], '180.00')
+        journal = JournalHeader.objects.get(pk=reval['journal_id'])
+        cogs_acct = _resolve_line_account(self.product, 'cogs', tenant_id=self.tenant.TenantID)
+        self.assertTrue(JournalLine.objects.filter(journal=journal, account=variance, debit=LD('120.00')).exists())
+        self.assertFalse(JournalLine.objects.filter(journal=journal, account=cogs_acct).exists())

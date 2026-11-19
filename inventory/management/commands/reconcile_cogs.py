@@ -1,7 +1,8 @@
 """يصحّح تكلفة البضاعة المباعة وقائمة الدخل لكل منتج وفق نموذج «تكلفة المنتجات»
 (متوسط مرجّح بالكمية). يعيد تقييم حركات البيع ويُرحّل قيد تسوية واحداً لكل منتج
-بفرق التكلفة (Dr ت.ب.م / Cr المخزون أو العكس) — يعالج البيع قبل وصول الشراء
-(COGS=0) والقيم المنحرفة الموجودة.
+بفرق التكلفة: حصة الحركات ذات اللقطة الثابتة (`standard`/`last_purchase`) تذهب إلى
+حساب فروقات تكلفة المبيعات، والباقي إلى ت.ب.م، والمخزون بالمجموع الكلّي — يعالج
+البيع قبل وصول الشراء (COGS=0) والقيم المنحرفة الموجودة.
 
     python manage.py reconcile_cogs                 # معاينة فقط (dry-run)
     python manage.py reconcile_cogs --apply          # ترحيل التسويات فعلياً
@@ -9,6 +10,7 @@
 """
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand
 
 from inventory.models import Product
@@ -29,23 +31,33 @@ class Command(BaseCommand):
             qs = qs.filter(tenant_id=opts['tenant'])
 
         adjusted = 0
+        errors = 0
         total_diff = Decimal('0')
         for p in qs.iterator():
-            res = reconcile_product_cogs(
-                tenant_id=p.tenant_id, product_id=p.id, apply=apply)
+            try:
+                res = reconcile_product_cogs(
+                    tenant_id=p.tenant_id, product_id=p.id, apply=apply)
+            except ValidationError as exc:
+                errors += 1
+                self.stdout.write(self.style.WARNING(
+                    f"{p.sku}: {'; '.join(exc.messages)}"
+                ))
+                continue
             diff = Decimal(res['diff'])
-            if diff == 0:
+            variance_diff = Decimal(res['variance_diff'])
+            if diff == 0 and variance_diff == 0:
                 continue
             adjusted += 1
             total_diff += diff
+            variance_part = f"، فروقات {res['variance_diff']}" if variance_diff != 0 else ""
             self.stdout.write(
                 f"{p.sku}: COGS {res['old_cogs']} → {res['new_cogs']} "
-                f"(فرق {res['diff']}، متوسط {res['average_cost']}"
+                f"(فرق {res['diff']}{variance_part}، متوسط {res['average_cost']}"
                 + (f"، قيد {res['journal_id']}" if res['journal_id'] else "") + ")"
             )
 
         verb = 'رُحِّلت تسويات' if apply else 'ستُرحَّل تسويات'
         self.stdout.write(self.style.SUCCESS(
-            f"\n{verb}: {adjusted} منتج · صافي فرق التكلفة {total_diff}."))
+            f"\n{verb}: {adjusted} منتج · صافي فرق التكلفة {total_diff} · متخطّى بخطأ: {errors}."))
         if not apply and adjusted:
             self.stdout.write("أعد التشغيل بـ --apply لترحيل قيود التسوية.")

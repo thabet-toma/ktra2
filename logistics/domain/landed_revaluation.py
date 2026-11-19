@@ -8,12 +8,12 @@
     قبل التعديل وبعده — فتنتقل التكلفة إلى البضاعة مرّةً واحدة كما في الترحيل)
     ومقابله لكل بند بفرق تكلفته المستوردة:
       - الباقي في المخزن  ← حساب المخزون، وترتفع/تنخفض كلفة طبقته (FIFO)
-      - المبيع (استُهلكت طبقته) ← تكلفة البضاعة المباعة، وتُحدَّث كلفة حركة البيع
+      - المبيع (استُهلكت طبقته) ← حصة اللقطة الثابتة (`standard`/`last_purchase`) إلى حساب فروقات تكلفة المبيعات والباقي إلى تكلفة البضاعة المباعة، وتُحدَّث كلفة حركة البيع
       - الذي لم يُستلَم بعد ← وسيط الاستلام (GR/IR) فيدخل المخزن بالكلفة الجديدة
       - بندٌ بحساب مصروف صريح ← حسابه
 
-قرار المالك (2026-09-26، الخيار «ج»): المبيع قيدُ تسويةٍ واحد على ت.ب.م لا عكسُ قيود البيع
-وإعادتها — مرآة Odoo (landed cost بعد البيع: الباقي على المخزون والمبيع على ت.ب.م).
+قرار المالك (2026-09-26، الخيار «ج»): المبيع قيدُ تسويةٍ واحد على ت.ب.م/الفروقات لا عكسُ قيود البيع
+وإعادتها — مرآة Odoo (landed cost بعد البيع: الباقي على المخزون والمبيع على ت.ب.م/الفروقات).
 
 حدٌّ معروف: إلغاء ترحيل بيعةٍ بعد التسوية يُعيد الكمية إلى طبقتها بالكلفة الجديدة بينما قيد
 البيع المحذوف كان بالقديمة — فيفترق حساب المخزون عن الطبقات بفرق الوحدة × الكمية. نادرٌ،
@@ -27,7 +27,9 @@ from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
 
-from inventory.cogs_method import sync_fifo_snapshot
+from inventory.cogs_method import (
+    FIXED_SNAPSHOT_METHODS, cost_variance_account_id, sync_fifo_snapshot,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +68,7 @@ class InvoicePlan:
     journal_id: int | None = None
 
     def summary(self) -> dict:
-        totals = {'inventory': ZERO, 'cogs': ZERO, 'clearing': ZERO, 'expense': ZERO}
+        totals = {'inventory': ZERO, 'cogs': ZERO, 'variance': ZERO, 'clearing': ZERO, 'expense': ZERO}
         for (kind, _acc), amount in self.buckets.items():
             totals[kind] += amount
         return {
@@ -135,7 +137,7 @@ def _dest_transfer_layer(movement):
 
 
 def _walk_layer(layer, unit_delta: Decimal, *, apply: bool, depth: int = 0) -> tuple:
-    """(قيمةٌ باقية في المخزن، قيمةٌ مبيعة) لفرق كلفة الوحدة على طبقةٍ وما استهلكها.
+    """(قيمةٌ باقية في المخزن، قيمةٌ مبيعة لـCOGS، قيمةٌ مبيعة بلقطة ثابتة) لفرق كلفة الوحدة.
 
     التحويل بين المستودعات يستهلك الطبقة ويُنشئ طبقةً في الوجهة: الفرق يتبعها إليها.
     `apply=True` يكتب: كلفة الطبقة ولقطات استهلاكها وكلفة حركات الصرف.
@@ -148,6 +150,7 @@ def _walk_layer(layer, unit_delta: Decimal, *, apply: bool, depth: int = 0) -> t
             f'التعديل يجعل كلفة وحدة الصنف #{layer.product_id} سالبة — راجع المبلغ.')
     in_stock = unit_delta * D(str(layer.remaining_qty))
     sold = ZERO
+    sold_fixed = ZERO
     for cons in layer.consumptions.select_related('movement').order_by('id'):
         value = unit_delta * D(str(cons.quantity))
         movement = cons.movement
@@ -156,15 +159,19 @@ def _walk_layer(layer, unit_delta: Decimal, *, apply: bool, depth: int = 0) -> t
             if movement.reference_type == 'WAREHOUSE_TRANSFER' and depth < 5 else None
         )
         if dest is not None and D(str(dest.original_qty)) > 0:
-            sub_stock, sub_sold = _walk_layer(
+            sub_stock, sub_sold, sub_sold_fixed = _walk_layer(
                 dest, value / D(str(dest.original_qty)), apply=apply, depth=depth + 1)
             in_stock += sub_stock
             sold += sub_sold
+            sold_fixed += sub_sold_fixed
         elif movement.reference_type == 'WAREHOUSE_TRANSFER':
             # وجهةٌ لا تتعيّن: القيمة باقية في المخزون على الأقل.
             in_stock += value
         else:
-            sold += value
+            if movement.cogs_method in FIXED_SNAPSHOT_METHODS:
+                sold_fixed += value
+            else:
+                sold += value
             if apply:
                 total = (D(str(movement.total_cost or 0)) + value).quantize(Q2)
                 qty = D(str(movement.quantity or 0))
@@ -180,11 +187,11 @@ def _walk_layer(layer, unit_delta: Decimal, *, apply: bool, depth: int = 0) -> t
     if apply:
         layer.unit_cost = new_cost.quantize(D('0.0001'))
         layer.save(update_fields=['unit_cost'])
-    return in_stock, sold
+    return in_stock, sold, sold_fixed
 
 
 def _product_split(invoice, product, qty: Decimal, delta: Decimal, *, apply: bool) -> tuple:
-    """(في المخزن، مبيع، لم يُستلَم) لفرق تكلفة صنفٍ في الفاتورة — مجموعها = الفرق."""
+    """(في المخزن، مبيع، مبيع ثابت، لم يُستلَم) لفرق تكلفة صنفٍ في الفاتورة — مجموعها = الفرق."""
     from inventory.models import StockLayer, StockLayerReconciliation, StockMovement
 
     unit_delta = delta / qty if qty > 0 else ZERO
@@ -193,25 +200,37 @@ def _product_split(invoice, product, qty: Decimal, delta: Decimal, *, apply: boo
         product_id=product.pk, movement_type='IN',
     ).order_by('id'))
     received = sum((Decimal(str(m.quantity)) for m in movements), Decimal('0'))
-    in_stock = sold = Decimal('0')
+    in_stock = sold = sold_fixed = Decimal('0')
     for m in movements:
         # بيعٌ سبق وصول البضاعة (مخزون سالب) سدّه هذا الاستلام: مبيعٌ لا مخزون.
-        for rec in StockLayerReconciliation.objects.filter(movement=m):
-            sold += unit_delta * Decimal(str(rec.quantity))
-        for layer in StockLayer.objects.filter(source_movement=m).order_by('id'):
-            s, c = _walk_layer(layer, unit_delta, apply=apply)
+        for rec in StockLayerReconciliation.objects.filter(
+            tenant_id=invoice.tenant_id, movement=m,
+        ).select_related('layer__source_movement'):
+            val = unit_delta * Decimal(str(rec.quantity))
+            src = rec.layer.source_movement
+            if src is not None and src.cogs_method in FIXED_SNAPSHOT_METHODS:
+                sold_fixed += val
+            else:
+                sold += val
+        for layer in StockLayer.objects.filter(
+            tenant_id=invoice.tenant_id, source_movement=m,
+        ).order_by('id'):
+            s, c, cf = _walk_layer(layer, unit_delta, apply=apply)
             in_stock += s
             sold += c
+            sold_fixed += cf
     unreceived = unit_delta * max(qty - received, Decimal('0'))
-    in_stock, sold, unreceived = _q(in_stock), _q(sold), _q(unreceived)
-    residual = delta - (in_stock + sold + unreceived)
+    in_stock, sold, sold_fixed, unreceived = _q(in_stock), _q(sold), _q(sold_fixed), _q(unreceived)
+    residual = delta - (in_stock + sold + sold_fixed + unreceived)
     if residual:
         # كسور التقريب على الوعاء الأكبر.
-        parts = {'stock': in_stock, 'sold': sold, 'unreceived': unreceived}
+        parts = {'stock': in_stock, 'sold': sold, 'sold_fixed': sold_fixed, 'unreceived': unreceived}
         biggest = max(parts, key=lambda k: abs(parts[k]))
         parts[biggest] += residual
-        in_stock, sold, unreceived = parts['stock'], parts['sold'], parts['unreceived']
-    return in_stock, sold, unreceived
+        in_stock, sold, sold_fixed, unreceived = (
+            parts['stock'], parts['sold'], parts['sold_fixed'], parts['unreceived'],
+        )
+    return in_stock, sold, sold_fixed, unreceived
 
 
 def _plan_invoice(snapshot: InvoiceSnapshot, *, apply: bool) -> InvoicePlan | None:
@@ -286,15 +305,20 @@ def _plan_invoice(snapshot: InvoiceSnapshot, *, apply: bool) -> InvoicePlan | No
             entry[1] += Decimal(str(it.quantity or 0))
             entry[2] += delta
 
+    variance_account_id = None
     for product, qty, delta in by_product.values():
         try:
             inventory_account = _resolve_line_account(product, 'inventory', tenant_id=inv.tenant_id)
         except Exception:
             inventory_account = default_inventory
         cogs_account = _resolve_line_account(product, 'cogs', tenant_id=inv.tenant_id)
-        in_stock, sold, unreceived = _product_split(inv, product, qty, delta, apply=apply)
+        in_stock, sold, sold_fixed, unreceived = _product_split(inv, product, qty, delta, apply=apply)
         add('inventory', inventory_account.id, in_stock)
         add('cogs', cogs_account.id, sold)
+        if sold_fixed:
+            if variance_account_id is None:
+                variance_account_id = cost_variance_account_id(inv.tenant_id)
+            add('variance', variance_account_id, sold_fixed)
         if unreceived:
             if uses_clearing:
                 add('clearing', clearing_account.id, unreceived)
@@ -332,8 +356,11 @@ def apply(snapshots: list[InvoiceSnapshot], *, adjust_date, user=None) -> list[I
         inv = PurchaseInvoice.objects.select_related('tenant').get(
             pk=p.invoice_id, tenant_id=snapshot.tenant_id)
         lines = []
-        labels = {'inventory': 'مخزون', 'cogs': 'تكلفة المبيع', 'clearing': 'وسيط الاستلام',
-                  'expense': 'مصروف'}
+        labels = {
+            'inventory': 'مخزون', 'cogs': 'تكلفة المبيع',
+            'variance': 'فروقات تكلفة المبيعات',
+            'clearing': 'وسيط الاستلام', 'expense': 'مصروف',
+        }
         for (kind, account_id), amount in sorted(p.buckets.items(), key=lambda kv: kv[0]):
             amount = _q(amount)
             if not amount:

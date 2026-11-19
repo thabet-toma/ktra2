@@ -16,7 +16,7 @@
 | الملف | الغرض | أسطر |
 |---|---|---|
 | `inventory/services.py` | `record_stock_movement` + التحام FIFO، عكس الحركات، بطاقة المنتج، نماذج التكلفة، ترحيل التحويل والجرد | 1368 |
-| `inventory/cogs_method.py` | `method_unit_cost` يقرأ سعر الطريقة و`apply_sale_cogs_snapshot` يحدد لقطة صرف البيع، والمساعدان المشتركان `is_sale_issue` (هل الحركة صرف بيع) و`sync_fifo_snapshot` (مزامنة لقطة FIFO مع `total_cost`) | 46 |
+| `inventory/cogs_method.py` | `method_unit_cost` يقرأ سعر الطريقة و`apply_sale_cogs_snapshot` يحدد لقطة صرف البيع، مع `FIXED_SNAPSHOT_METHODS` و`cost_variance_account_id` و`MISSING_COST_VARIANCE_ACCOUNT_ERROR` لتوجيه تصحيحات اللقطة الثابتة، و`build_cogs_adjustment_lines` لبناء أسطر قيد تسوية ت.ب.م/الفروقات/المخزون المشترك، والمساعدين `is_sale_issue` و`sync_fifo_snapshot` | 94 |
 | `inventory/views.py` | ViewSets: المنتجات، الحركات، المستودعات، التحويلات، الجرد | 891 |
 | `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 1285 |
 | `inventory/models.py` | 14 موديل: المنتج (البراند)، المنتج الأب (`ProductFamily`)، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد، وسلسلة الطلب الأسبوعية المحسوبة (`ProductDemandForecast`، #32)، وموقعُ التخزين لكلّ مخزن (`ProductStorageLocation`، TASK-2a) | 465 |
@@ -84,7 +84,7 @@ def product_linked_invoices(*, tenant_id, product_id=None, product_ids=None) -> 
 def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:  # (986)
 def set_avg_cost_from_purchases(product) -> Decimal:  # النموذج الدوري: متوسط كل المشتريات (1070)
 def apply_purchase_cost_model(product) -> None:  # يختار WAC المتحرك أو الدوري حسب SalesSettings (1087)
-def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:  # (1107)
+def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:  # يفصل الفرق بين ت.ب.م وحساب الفروقات حسب `cogs_method` ويعيد `variance_diff`
 def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:  # (78)
 def generate_next_sku(tenant) -> str:  # (140)
 def create_product_with_family(*, tenant=None, tenant_id=None, **fields) -> tuple[ProductFamily, Product]:  # نقطة الإنشاء الموحّدة الوحيدة (task20) — أربعة مسارات حيّة تمرّ من هنا: واجهة المنتجات، وتجسيد عرض المورّد، ومنتج الأجرة في `after_sales`، وجسر المزامنة `bridge`
@@ -875,7 +875,16 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 - **المخزونُ السالب يُصحَّح بتاريخ وصول البضاعة دائماً** (#136): البيعُ على السالب يأخذ
   آخرَ كلفةٍ معروفة في طبقةٍ مؤقّتة، وحين تصل البضاعة الحقيقيّة تُسدّ الحفرةُ ويُطلَع
   **قيدُ فرقٍ بتاريخ الورود بلا استثناء** — لا فحصَ لفترة البيعة ولا طلبَ فتحِ فترةٍ
-  مقفولة، وفرقٌ صفريٌّ ⟵ لا قيد. و`WAREHOUSE_TRANSFER` مستثنىً من التسوية: صافي أثره
+  مقفولة، ولا يسقط القيد إلا إذا كان الفرق الإجماليّ وحصّةُ الفروقات صفراً معاً
+  (فإجماليٌّ صفريٌّ مع فروقاتٍ غير صفريّة يُرحَّل بلا سطر مخزون، مثلاً مدين ت.ب.م / دائن الفروقات). ويُقسَّم الفرق لكل طبقةٍ في `inventory/fifo.py`
+  (`reconcile_provisional`، `ReconcileDetail`) داخل `inventory/services.py`
+  (`_post_provisional_reconciliation_diff`) حسب `cogs_method` لحركة البيع: اللقطات الثابتة
+  (`inventory/cogs_method.py` (`FIXED_SNAPSHOT_METHODS`)) تذهب إلى
+  `inventory/cogs_method.py` (`cost_variance_account_id`)، وسواها إلى ت.ب.م،
+  والمخزونُ بالمجموع؛ وغياب الحساب عند فرقٍ ثابتٍ يرفع `ValidationError` ويلغي حركة الورود.
+  وكذلك `inventory/services.py` (`reconcile_product_cogs`) وأمر
+  `inventory/management/commands/recompute_moving_wac_cogs.py` (`Command`) يفصلان
+  الفرق بالقاعدة نفسها حسب `cogs_method` لكل حركة. و`WAREHOUSE_TRANSFER` مستثنىً من التسوية: صافي أثره
   صفرٌ وبلا قيد، فتسويةُ استلامِه لحفرةٍ خلقها صرفُه نفسُه تُصفّر طبقتَه الجديدة.
 - **تكلفة البيع والمرتجع**: `sales/services/pricing.py` (`sales_cogs_map`) يجمع لقطة
   `cogs_cost` إن وجدت وإلا `total_cost`. ويعيد `inventory/fifo.py` (`restore_partial`)
