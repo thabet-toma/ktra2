@@ -14,7 +14,7 @@ from core.user_roles import user_display_name
 # `SalesSettings.cogs_cost_method` يقرآن القائمةَ نفسها فلا تفترق نسختان.
 # صرف البيع (OUT بمرجع SALE/STOCK_ISSUE) يكتب اللقطةَ عند الترحيل عبر
 # `inventory/cogs_method.py` (`apply_sale_cogs_snapshot`) بطريقة `SalesSettings.cogs_cost_method`،
-# والمرتجع ينسخها من أصله؛ ولا API ولا واجهة لاختيار الطريقة بعد (M1B-3).
+# والمرتجع ينسخها من أصله؛ وتُختار الطريقة وتُضبط عبر `SalesSettingsViewSet.current` (والواجهة في M2).
 COGS_METHOD_FIFO = 'fifo'
 COGS_METHOD_AVCO = 'avco'
 COGS_METHOD_STANDARD = 'standard'

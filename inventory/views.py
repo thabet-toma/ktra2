@@ -231,6 +231,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
         'online_price': 'سعر الإنترنت',
         'online_description': 'وصف الإنترنت',
         'sale_price': 'سعر البيع',
+        'standard_cost': 'السعر الثابت',
         # T-ITEMS M5: حقولٌ صارت تُحفَظ فعلاً — فتُسجَّل تغييراتها كغيرها.
         'uom2': 'الوحدة الثانية',
         'uom2_factor': 'معامل الوحدة الثانية',

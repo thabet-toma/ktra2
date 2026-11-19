@@ -185,6 +185,156 @@ def _fill_missing_default_accounts(settings_obj: SalesSettings, tenant_id) -> li
     return filled
 
 
+def default_cost_variance_account_code(default_cogs_account: Account | None) -> str | None:
+    """كود حساب فروقات تكلفة المبيعات الافتراضي: أوّل حرفين من كود التكلفة + «90» (مثل 5190)."""
+    if default_cogs_account is None:
+        return None
+    cogs_code = (default_cogs_account.code or "").strip()
+    if len(cogs_code) < 2:
+        return None
+    return f"{cogs_code[:2]}90"
+
+
+def cost_variance_account_error(
+    account: Account | None,
+    *,
+    tenant_id: int,
+    default_cogs_account: Account | None,
+) -> str | None:
+    """يتحقّق من أهلية حساب فروقات تكلفة المبيعات — يعيد رسالة عربية أو None."""
+    if account is None:
+        return None
+    if getattr(account, "tenant_id", None) != tenant_id:
+        return "حساب فروقات التكلفة يجب أن يتبع الشركة نفسها."
+    if account.account_type != "Expense":
+        return "حساب فروقات التكلفة يجب أن يكون من نوع مصروفات (Expense)."
+    if not account.is_active:
+        return "حساب فروقات التكلفة يجب أن يكون نشطاً."
+    if Account.objects.filter(tenant_id=tenant_id, parent_id=account.pk).exists():
+        return "حساب فروقات التكلفة يجب أن يكون حساباً فرعياً (ورقة) بلا حسابات تابعة."
+    if account.nature not in (None, "", Account.NATURE_BOTH):
+        return "طبيعة حساب فروقات التكلفة يجب أن تقبل المدين والدائن."
+    if default_cogs_account is None:
+        return "عيّن حساب تكلفة المبيعات الافتراضي أولاً قبل تحديد حساب الفروقات."
+    if getattr(default_cogs_account, "tenant_id", None) != tenant_id:
+        return "حساب تكلفة المبيعات الافتراضي يجب أن يتبع الشركة نفسها."
+    if account.pk == default_cogs_account.pk:
+        return "حساب فروقات التكلفة لا يمكن أن يكون نفس حساب تكلفة المبيعات الافتراضي."
+    cogs_code = (default_cogs_account.code or "").strip()
+    if len(cogs_code) < 2:
+        return "عيّن حساب تكلفة مبيعات بكود صالح (حرفان على الأقل) أولاً."
+    group_code = cogs_code[:2]
+    acc_code = (account.code or "").strip()
+    if not acc_code.startswith(group_code):
+        return f"حساب فروقات التكلفة يجب أن يكون ضمن مجموعة تكلفة المبيعات (يبدأ كوده بـ {group_code})."
+    return None
+
+
+_MISSING_COGS_VARIANCE_ACCOUNT_ERROR = (
+    "تعذّر إنشاء حساب فروقات التكلفة تلقائياً لعدم وجود حساب تكلفة مبيعات صالح؛ "
+    "يرجى اختيار حساب الفروقات يدوياً."
+)
+
+
+def _inspect_default_cost_variance_account(
+    default_cogs_account: Account | None,
+    *,
+    tenant_id: int,
+) -> tuple[str | None, Account | None, str | None]:
+    """يفحص أهلية الحساب الافتراضي (`G+90`): يعيد `(code, existing_valid_account, error_message)`."""
+    if (
+        default_cogs_account is None
+        or getattr(default_cogs_account, "tenant_id", None) != tenant_id
+    ):
+        return None, None, _MISSING_COGS_VARIANCE_ACCOUNT_ERROR
+    code = default_cost_variance_account_code(default_cogs_account)
+    if code is None:
+        return None, None, _MISSING_COGS_VARIANCE_ACCOUNT_ERROR
+    existing = Account.objects.filter(tenant_id=tenant_id, code=code).first()
+    if existing is not None:
+        if (
+            cost_variance_account_error(
+                existing, tenant_id=tenant_id, default_cogs_account=default_cogs_account,
+            )
+            is not None
+        ):
+            return (
+                code,
+                None,
+                f"الحساب الافتراضي ({code}) موجود لكنه لا يصلح كحساب فروقات تكلفة؛ "
+                "يرجى اختيار حساب الفروقات يدوياً.",
+            )
+        return code, existing, None
+    return code, None, None
+
+
+def default_cost_variance_account_error(
+    default_cogs_account: Account | None,
+    *,
+    tenant_id: int,
+) -> str | None:
+    """يتحقّق من إمكانية استخدام/إنشاء حساب الفروقات الافتراضي، وإلا يعيد رسالة الاختيار اليدوي."""
+    _, _, err = _inspect_default_cost_variance_account(
+        default_cogs_account, tenant_id=tenant_id,
+    )
+    return err
+
+
+def resolve_default_cost_variance_account(
+    settings_obj: SalesSettings,
+    *,
+    default_cogs_account: Account | None = None,
+) -> Account | None:
+    """يُعيد (أو يُنشئ) حساب فروقات تكلفة المبيعات الافتراضي للشركة بلا تحويل ورقةٍ إلى أب.
+
+    إن وُجد حسابٌ بالكود المطلوب في الشركة، يُعاد استعماله فقط إن استوفى كل
+    قواعد الأهلية، وإلا يعود `None` دون تعديل الحساب القائم.
+    """
+    tenant_id = settings_obj.tenant_id
+    cogs_account = (
+        default_cogs_account if default_cogs_account is not None else settings_obj.default_cogs_account
+    )
+    if cogs_account is None or getattr(cogs_account, "tenant_id", None) != tenant_id:
+        return None
+    code, existing, err = _inspect_default_cost_variance_account(
+        cogs_account, tenant_id=tenant_id,
+    )
+    if err is not None:
+        return None
+    if existing is not None:
+        return existing
+
+    # البذرة تضع `51` تحت `5` فيكون الأب `5`، وفي شجرةٍ تحوي `5101` تحت `51` يكون
+    # الأب `51`؛ ورقة تكلفة المبيعات نفسها لا تتحوّل إلى أب أبداً.
+    parent = cogs_account.parent
+
+    account, created = Account.objects.get_or_create(
+        tenant_id=tenant_id,
+        code=code,
+        defaults={
+            "name": "فروقات أسعار البضاعة المباعة",
+            "account_type": "Expense",
+            "nature": None,
+            "is_active": True,
+            "parent": parent,
+        },
+    )
+    # حارس ضدّ الإنشاء المتزامن لحسابٍ غير صالح بين الفحص الأول وget_or_create.
+    if not created and (
+        cost_variance_account_error(
+            account, tenant_id=tenant_id, default_cogs_account=cogs_account,
+        )
+        is not None
+    ):
+        return None
+    if created:
+        logger.info(
+            "sales.cost_variance_account.created tenant=%s account=%s code=%s",
+            tenant_id, account.pk, code,
+        )
+    return account
+
+
 def get_or_create_sales_settings(tenant) -> SalesSettings:
     """يُعيد (أو يُنشئ) إعدادات المبيعات للشركة، ويضبط قيمًا افتراضية ذكية."""
     tenant_id = getattr(tenant, "TenantID", tenant)

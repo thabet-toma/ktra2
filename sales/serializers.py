@@ -5,7 +5,12 @@ from django.db import transaction
 from rest_framework import serializers
 
 from accounting.models import Account, Cheque
-from inventory.models import Product
+from inventory.models import (
+    COGS_METHOD_AVCO,
+    COGS_METHOD_LAST_PURCHASE,
+    COGS_METHOD_STANDARD,
+    Product,
+)
 from partners.models import Partner
 from tenants.models import Currency
 from core.api_defaults import TenantScopedPrimaryKeyRelatedField
@@ -35,11 +40,14 @@ from .models import (
 )
 from .services import (
     allocate_invoice_discount,
+    cost_variance_account_error,
+    default_cost_variance_account_error,
     guard_loss_invoice,
     invoice_pending_payment_total,
     next_credit_debit_note_number,
     next_invoice_number,
     recalculate_invoice_amounts,
+    resolve_default_cost_variance_account,
     validate_credit_debit_note,
 )
 
@@ -1006,6 +1014,15 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
     vat_input_account_name = serializers.CharField(
         source="vat_input_account.name", read_only=True, default=None
     )
+    cost_variance_account_name = serializers.CharField(
+        source="cost_variance_account.name", read_only=True, default=None
+    )
+    default_cogs_account = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
+    cost_variance_account = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
 
     class Meta:
         model = SalesSettings
@@ -1023,6 +1040,9 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "default_cash_account_name",
             "default_inventory_account",
             "default_cogs_account",
+            "cost_variance_account",
+            "cost_variance_account_name",
+            "cogs_cost_method",
             "default_ar_account",
             "default_payment_type",
             "stock_on_post_default",
@@ -1068,7 +1088,87 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "default_vat_rate_code",
             "default_vat_rate_value",
             "vat_input_account_name",
+            "cost_variance_account_name",
         ]
+
+    def validate_cogs_cost_method(self, value):
+        if value == COGS_METHOD_AVCO:
+            raise serializers.ValidationError("طريقة المتوسط المرجّح غير متاحة بعد.")
+        return value
+
+    def _cogs_settings_changed(self, data):
+        instance = self.instance
+        if (
+            "cogs_cost_method" in data
+            and data["cogs_cost_method"] != instance.cogs_cost_method
+        ):
+            return True
+        for field in ("default_cogs_account", "cost_variance_account"):
+            if field in data:
+                incoming = data[field]
+                incoming_pk = incoming.pk if incoming is not None else None
+                if incoming_pk != getattr(instance, f"{field}_id"):
+                    return True
+        return False
+
+    def _final_cogs_settings_values(self, data):
+        instance = self.instance
+        final_method = (
+            data["cogs_cost_method"]
+            if "cogs_cost_method" in data
+            else instance.cogs_cost_method
+        )
+        final_cogs = (
+            data["default_cogs_account"]
+            if "default_cogs_account" in data
+            else instance.default_cogs_account
+        )
+        final_variance = (
+            data["cost_variance_account"]
+            if "cost_variance_account" in data
+            else instance.cost_variance_account
+        )
+        return final_method, final_cogs, final_variance
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if not self._cogs_settings_changed(attrs):
+            return attrs
+        tenant_id = self.instance.tenant_id
+        final_method, final_cogs, final_variance = self._final_cogs_settings_values(attrs)
+        if final_variance is not None:
+            err = cost_variance_account_error(
+                final_variance, tenant_id=tenant_id, default_cogs_account=final_cogs,
+            )
+            if err:
+                raise serializers.ValidationError({"cost_variance_account": err})
+        elif final_method in (COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE):
+            err = default_cost_variance_account_error(final_cogs, tenant_id=tenant_id)
+            if err:
+                raise serializers.ValidationError({"cost_variance_account": err})
+        return attrs
+
+    def update(self, instance, validated_data):
+        if not self._cogs_settings_changed(validated_data):
+            return super().update(instance, validated_data)
+        final_method, final_cogs, final_variance = self._final_cogs_settings_values(validated_data)
+        with transaction.atomic():
+            if (
+                final_method in (COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE)
+                and final_variance is None
+            ):
+                resolved = resolve_default_cost_variance_account(
+                    instance, default_cogs_account=final_cogs,
+                )
+                if resolved is None:
+                    raise serializers.ValidationError({
+                        "cost_variance_account": (
+                            "تعذّر إنشاء أو استخدام حساب فروقات التكلفة الافتراضي؛ "
+                            "يرجى اختيار حساب الفروقات يدوياً."
+                        )
+                    })
+                validated_data["cost_variance_account"] = resolved
+            return super().update(instance, validated_data)
 
 
 class DeliveryOrderLineSerializer(serializers.ModelSerializer):

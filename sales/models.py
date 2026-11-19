@@ -228,14 +228,15 @@ class SalesSettings(models.Model):
         db_column="UseMovingAverageCost",
         help_text="مفعّل = متوسط مرجّح متحرك (تكلفة لحظة البيع، مثل الأنظمة الاحترافية)؛ معطّل = متوسط كل فواتير الشراء (النموذج الدوري)",
     )
-    # M1A-COGS: يقرؤها `inventory/services.py` (`record_stock_movement`) وقت الترحيل لكتابة لقطة تكلفة البيع، ولا يعرضها
-    # API أو واجهة بعد (M1B-3/M1B-4)؛ و`use_moving_average_cost` أعلاه تبقى مستقلةً ولا تُخلط بها.
+    # M1A-COGS / M1B-3a: يقرؤها `inventory/services.py` (`record_stock_movement`) وقت الترحيل لكتابة لقطة تكلفة البيع،
+    # وتعرضها نقطة إعدادات المبيعات (`SalesSettingsViewSet.current`) مع التحقق والتدقيق (والواجهة في M2)؛
+    # و`use_moving_average_cost` أعلاه تبقى مستقلةً ولا تُخلط بها.
     cogs_cost_method = models.CharField(
         max_length=20,
         choices=COGS_METHOD_CHOICES,
         default=COGS_METHOD_FIFO,
         db_column="CogsCostMethod",
-        help_text="طريقة تكلفة المبيعات للشركة (تُخزَّن الآن؛ التنفيذ في M1B)",
+        help_text="طريقة تكلفة المبيعات للشركة (تُقرأ لقطةً عند ترحيل فاتورة البيع)",
     )
 
     default_vat_rate = models.ForeignKey(

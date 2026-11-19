@@ -1815,8 +1815,22 @@ class CustomerPaymentViewSet(OptimisticConcurrencyMixin, PostedTextEditMixin, vi
         return Response(rows)
 
 
+_COGS_SETTINGS_ACTIVITY_LABELS = {
+    "cogs_cost_method": "طريقة تكلفة المبيعات",
+    "cost_variance_account": "حساب فروقات تكلفة المبيعات",
+}
+
+
+def _format_settings_account_label(account) -> str:
+    if account is None:
+        return ""
+    if account.code and account.name:
+        return f"{account.code} — {account.name}"
+    return account.code or account.name or ""
+
+
 class SalesSettingsViewSet(viewsets.ViewSet):
-    """نقطة واحدة (GET/PUT) للحصول على/تحديث إعدادات المبيعات للشركة."""
+    """نقطة واحدة (GET/PUT/PATCH) للحصول على/تحديث إعدادات المبيعات للشركة."""
 
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
@@ -1830,9 +1844,32 @@ class SalesSettingsViewSet(viewsets.ViewSet):
         if request.method == "GET":
             return Response(SalesSettingsSerializer(ss).data)
         require_perm(request, "sales.settings.manage", tenant=tenant)
-        ser = SalesSettingsSerializer(ss, data=request.data, partial=True)
+        before = {
+            "cogs_cost_method": ss.get_cogs_cost_method_display(),
+            "cost_variance_account": _format_settings_account_label(ss.cost_variance_account),
+        }
+        ser = SalesSettingsSerializer(
+            ss, data=request.data, partial=True, context={"request": request},
+        )
         ser.is_valid(raise_exception=True)
-        ser.save()
+        updated_ss = ser.save()
+        after = {
+            "cogs_cost_method": updated_ss.get_cogs_cost_method_display(),
+            "cost_variance_account": _format_settings_account_label(updated_ss.cost_variance_account),
+        }
+        changes = build_activity_changes(
+            before=before, after=after, labels=_COGS_SETTINGS_ACTIVITY_LABELS,
+        )
+        if changes:
+            log_activity(
+                action="update",
+                entity_type="sales_settings",
+                entity_id=updated_ss.pk,
+                entity_label="إعدادات المبيعات",
+                description=describe_activity_changes(changes),
+                metadata={"changes": changes},
+                request=request,
+            )
         return Response(ser.data)
 
     @action(detail=False, methods=["post"], url_path="restore-defaults")

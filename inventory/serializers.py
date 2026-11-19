@@ -342,6 +342,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
             # كرت المنتج: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
             'sale_price',
+            'standard_cost',
             'purchased_qty', 'avg_monthly_sales',
             # ITEM-PURCHASE-DISPLAY: آخر سعر شراء (الأساسي في القائمة) ومنتجٌ بلا
             # شراء مرحَّل يعرضه `null`؛ و«أقلّ شراء ضمن آخر ٥» (#133) يبقى حقلاً

@@ -1031,3 +1031,34 @@ class ProductApiTest(APITestCase):
         res = self.client.get(f"{PRODUCTS_URL}{product.id}/", HTTP_X_TENANT_ID=self._tenant_id)
         assert res.status_code == 200, res.content[:300]
         assert res.json()["uom_name"] == "كرتونة"
+
+    # ── M1B-3a: السعر الثابت (standard_cost) في السيريالايزر وسجل النشاط ──
+    def test_standard_cost_round_trips_and_logs_activity(self):
+        self._auth()
+        created = self._post({"name_ar": "منتج بسعر ثابت", "standard_cost": "10.50"}).json()
+        assert created["standard_cost"] == "10.5000"
+        assert Product.objects.get(pk=created["id"]).standard_cost == Decimal("10.5000")
+
+        res = self.client.patch(
+            f"{PRODUCTS_URL}{created['id']}/", {"standard_cost": "14.25"},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert res.status_code == 200, res.content[:300]
+        assert res.json()["standard_cost"] == "14.2500"
+        assert Product.objects.get(pk=created["id"]).standard_cost == Decimal("14.2500")
+
+        activity = ActivityLog.objects.filter(
+            tenant=self.t_a, entity_type="product", entity_id=created["id"], action="update",
+        ).latest("id")
+        assert activity.metadata["changes"] == [{
+            "field": "standard_cost",
+            "label": "السعر الثابت",
+            "old": "10.5",
+            "new": "14.25",
+        }]
+
+        bad = self.client.patch(
+            f"{PRODUCTS_URL}{created['id']}/", {"standard_cost": "-1"},
+            format="json", HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert bad.status_code == 400, bad.content[:300]

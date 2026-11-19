@@ -11,7 +11,8 @@
 
 | التاريخ | Commit | التغيير |
 |---|---|---|
-| 2026-11-18 | _(غير مودع)_ | **SEC-MANUAL-REF**: حصر `reference_type` في نقطة إنشاء حركة المخزون اليدوية (`StockMovementViewSet.create`) على `MANUAL` فقط (`StockMovement.MANUAL_REFERENCE_TYPES`)، مع تحويل الغائب/الفارغ إلى `MANUAL` ورفض ما عداه بـ400. |
+| 2026-11-19 | _(غير مودع)_ | **M1B-3a**: كشف `cogs_cost_method` و`cost_variance_account` في `SalesSettingsSerializer`/`SalesSettingsViewSet.current` مع التحقّق وإنشاء/تثبيت الحساب الافتراضي `G+90` لـ`standard`/`last_purchase` وتسجيل تغييراتهما في `ActivityLog` (`sales_settings`)، وكشف `Product.standard_cost` في `ProductSerializer` مع تدريجه في سجلّ النشاط («السعر الثابت»)، وهجرة `sales/0055_alter_salessettings_cogs_cost_method`. |
+| 2026-11-18 | `7a39d6e6` | **SEC-MANUAL-REF**: حصر `reference_type` في نقطة إنشاء حركة المخزون اليدوية (`StockMovementViewSet.create`) على `MANUAL` فقط (`StockMovement.MANUAL_REFERENCE_TYPES`)، مع تحويل الغائب/الفارغ إلى `MANUAL` ورفض ما عداه بـ400. |
 | 2026-11-18 | `1a06ee68` | **M1B-2**: كتابة لقطة تكلفة صرف البيع عند الترحيل حسب الطريقة (standard / last_purchase / fifo)، مع تحذير الغياب والاحتياط إلى FIFO ومزامنة لقطته عند إعادة كتابة التكلفة. |
 | 2026-11-18 | `3cbbc396` | **M1B-R**: إلغاء ترحيل مرتجع البيع يعكس استعادة طبقات FIFO بقفل السجلات وحارس ترتيب المرتجعات؛ المرتجع اللاحق التاريخي بلا سجلّ استعادة لا يُكشف. |
 | 2026-11-18 | `7cbb3704` | **M1B-1**: فصل تكلفة الطريقة عن قيمة المخزون في قيد المبيعات وعكس لقطة المرتجع حسب استهلاك الأصل، مع حساب الفروقات والاحتياط إلى تكلفة الطبقات. |
