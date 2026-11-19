@@ -19,7 +19,8 @@ from django.contrib.auth.models import User
 
 from accounting.models import Account
 from accounting.services import create_fiscal_year
-from inventory.models import Product, StockLayer
+from inventory import fifo
+from inventory.models import Product, StockLayer, StockMovement
 from inventory.services import record_stock_movement
 from partners.models import Partner
 from sales.models import SalesInvoice, SalesInvoiceLine, SalesSettings
@@ -199,3 +200,16 @@ def test_returning_more_than_was_sold_adds_the_surplus_as_a_layer(env):
         (layer.remaining_qty for layer in StockLayer.objects.filter(product=product)),
         Decimal("0"),
     ) == Decimal("75.0000")
+
+
+def test_restore_partial_reports_each_origin(env):
+    tenant, cur, customer, product = env
+    first = _sell(tenant, cur, customer, product, 2, 'BREAK-1')
+    second = _sell(tenant, cur, customer, product, 3, 'BREAK-2')
+    movements = list(StockMovement.objects.filter(
+        reference_type='SALE', reference_id__in=[first.id, second.id]).order_by('id'))
+    result = fifo.restore_partial(movements=movements, quantity=Decimal('4'))
+    assert result.by_origin == {
+        movements[0].id: (Decimal('1'), Decimal('10')),
+        movements[1].id: (Decimal('3'), Decimal('30')),
+    }

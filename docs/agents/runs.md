@@ -220,3 +220,9 @@
 | 2026-11-19 | مراجعة Standards M1B-4 | Opus (وكيل فرعي) | ~10 د | 1 major مرفوض (محسوم ← M2)، 6 minor، 7 nit؛ لا خرق ثوابت |
 | 2026-11-19 | مراجعة Spec نهائية M1B-4 | Opus subagent | ~4.5د، 29 أداة | مطابق؛ 5 nits |
 | 2026-11-19 | مراجعة Standards نهائية M1B-4 | Opus subagent | ~9د، 35 أداة | 4 minor + 6 nits؛ عقد import-linter مكسور سابقاً |
+| 2026-11-19 | تصليح 2 M1B-4 (F8–F14) | Hydrogen (gemini-4-hydrogen-high) agy، high | — | نظيف بعد قراءة الفرق |
+| 2026-11-19 | فحص مرئي M1B-4 (Playwright مؤقّت) | Hydrogen agy، high | — | 8 صور؛ 240px يسار في 4 تركيبات |
+| 2026-11-19 | بوّابة معزولة M1B-4 | المنسّق | 6:01د | 1 failed معروف، 8097 passed |
+| 2026-11-19 | تنفيذ LINT-INV-SALES (محاولة 1) | Hydrogen agy، high | 6ث | فشل backend: empty conversation id، بلا تعديل |
+| 2026-11-19 | تنفيذ LINT-INV-SALES (محاولة 2) | Hydrogen agy، high | — | نظيف؛ 8 passed، 1288 passed، 3 kept |
+| 2026-11-19 | بوّابة معزولة LINT | المنسّق | 4:29د | PaperAmounts المعروف + freshness ← sync_docs |
