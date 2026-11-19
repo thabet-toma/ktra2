@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from rest_framework import serializers
 
-from accounting.models import Account, Cheque
+from accounting.models import Account, Cheque, TaxRate
 from inventory.models import (
     COGS_METHOD_AVCO,
     COGS_METHOD_LAST_PURCHASE,
@@ -39,6 +39,7 @@ from .models import (
     SalesSettings,
 )
 from .services import (
+    COST_VARIANCE_RESOLVE_FAILED_ERROR,
     allocate_invoice_discount,
     cost_variance_account_error,
     default_cost_variance_account_error,
@@ -1017,10 +1018,34 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
     cost_variance_account_name = serializers.CharField(
         source="cost_variance_account.name", read_only=True, default=None
     )
+    default_customer = TenantScopedPrimaryKeyRelatedField(
+        queryset=Partner.objects.all(), allow_null=True, required=False,
+    )
+    default_revenue_account_product = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
+    default_revenue_account_service = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
+    default_cash_account = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
+    default_inventory_account = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
     default_cogs_account = TenantScopedPrimaryKeyRelatedField(
         queryset=Account.objects.all(), allow_null=True, required=False,
     )
     cost_variance_account = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
+    default_ar_account = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), allow_null=True, required=False,
+    )
+    default_vat_rate = TenantScopedPrimaryKeyRelatedField(
+        queryset=TaxRate.objects.all(), allow_null=True, required=False,
+    )
+    vat_input_account = TenantScopedPrimaryKeyRelatedField(
         queryset=Account.objects.all(), allow_null=True, required=False,
     )
 
@@ -1162,10 +1187,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
                 )
                 if resolved is None:
                     raise serializers.ValidationError({
-                        "cost_variance_account": (
-                            "تعذّر إنشاء أو استخدام حساب فروقات التكلفة الافتراضي؛ "
-                            "يرجى اختيار حساب الفروقات يدوياً."
-                        )
+                        "cost_variance_account": [COST_VARIANCE_RESOLVE_FAILED_ERROR],
                     })
                 validated_data["cost_variance_account"] = resolved
             return super().update(instance, validated_data)

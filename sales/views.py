@@ -29,6 +29,11 @@ from core.plans import enforce_limits
 from core.posted_text import PostedTextEditMixin
 from core.tenant_utils import get_branch, get_tenant
 from core.terminology import term as tenant_term
+from inventory.models import (
+    COGS_METHOD_FIFO,
+    COGS_METHOD_LAST_PURCHASE,
+    COGS_METHOD_STANDARD,
+)
 from .models import (
     CreditDebitNote,
     CustomerPayment,
@@ -53,6 +58,7 @@ from .serializers import (
     SalesSettingsSerializer,
 )
 from .services import (
+    COST_VARIANCE_RESOLVE_FAILED_ERROR,
     allocate_customer_payment,
     deallocate_customer_payment,
     attach_payment_voucher,
@@ -63,6 +69,8 @@ from .services import (
     convert_order_to_invoice,
     convert_quotation_to_invoice,
     convert_quotation_to_order,
+    cost_variance_account_error,
+    default_cost_variance_account_error,
     document_delete_allowed,
     duplicate_invoice_for_today,
     last_month_invoice_for_customer,
@@ -95,6 +103,8 @@ from .services import (
     release_auto_sales_return_refund,
     release_sales_serials,
     remaining_delivery_lines,
+    resolve_default_account,
+    resolve_default_cost_variance_account,
     revert_returned_sales_serials,
     suggest_fifo_allocations,
     unpost_customer_payment,
@@ -1829,8 +1839,34 @@ def _format_settings_account_label(account) -> str:
     return account.code or account.name or ""
 
 
+def _sales_settings_cogs_snapshot(ss: SalesSettings) -> dict[str, str]:
+    return {
+        "cogs_cost_method": ss.get_cogs_cost_method_display(),
+        "cost_variance_account": _format_settings_account_label(ss.cost_variance_account),
+    }
+
+
+def _log_sales_settings_cogs_changes(
+    request, ss: SalesSettings, before: dict[str, str],
+) -> None:
+    after = _sales_settings_cogs_snapshot(ss)
+    changes = build_activity_changes(
+        before=before, after=after, labels=_COGS_SETTINGS_ACTIVITY_LABELS,
+    )
+    if changes:
+        log_activity(
+            action="update",
+            entity_type="sales_settings",
+            entity_id=ss.pk,
+            entity_label="إعدادات المبيعات",
+            description=describe_activity_changes(changes),
+            metadata={"changes": changes},
+            request=request,
+        )
+
+
 class SalesSettingsViewSet(viewsets.ViewSet):
-    """نقطة واحدة (GET/PUT/PATCH) للحصول على/تحديث إعدادات المبيعات للشركة."""
+    """نقطة واحدة (GET/PUT/PATCH) للحصول على/تحديث إعدادات المبيعات للشركة، ونقطة POST `restore-defaults` لاستعادة الافتراضيات."""
 
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
@@ -1844,43 +1880,28 @@ class SalesSettingsViewSet(viewsets.ViewSet):
         if request.method == "GET":
             return Response(SalesSettingsSerializer(ss).data)
         require_perm(request, "sales.settings.manage", tenant=tenant)
-        before = {
-            "cogs_cost_method": ss.get_cogs_cost_method_display(),
-            "cost_variance_account": _format_settings_account_label(ss.cost_variance_account),
-        }
+        before = _sales_settings_cogs_snapshot(ss)
         ser = SalesSettingsSerializer(
             ss, data=request.data, partial=True, context={"request": request},
         )
         ser.is_valid(raise_exception=True)
         updated_ss = ser.save()
-        after = {
-            "cogs_cost_method": updated_ss.get_cogs_cost_method_display(),
-            "cost_variance_account": _format_settings_account_label(updated_ss.cost_variance_account),
-        }
-        changes = build_activity_changes(
-            before=before, after=after, labels=_COGS_SETTINGS_ACTIVITY_LABELS,
-        )
-        if changes:
-            log_activity(
-                action="update",
-                entity_type="sales_settings",
-                entity_id=updated_ss.pk,
-                entity_label="إعدادات المبيعات",
-                description=describe_activity_changes(changes),
-                metadata={"changes": changes},
-                request=request,
-            )
+        _log_sales_settings_cogs_changes(request, updated_ss, before)
         return Response(ser.data)
 
     @action(detail=False, methods=["post"], url_path="restore-defaults")
     def restore_defaults(self, request):
         """T-S3: استعادة خريطة القيد الافتراضية — يُعيد الحسابات الافتراضية لكل نوع
-        فاتورة إلى أفضل تطابق من شجرة الحسابات (حسب الكود ثم النوع ثم الاسم)."""
+        فاتورة إلى أفضل تطابق من شجرة الحسابات (حسب الكود ثم النوع ثم الاسم).
+
+        يتطلّب صلاحية `sales.settings.manage`، ويعيد فحص حساب فروقات التكلفة أمام
+        حساب التكلفة الجديد (`fifo` يمسح غير الصالح؛ `standard`/`last_purchase` يحلّان
+        الافتراضي أو يعيدان 400 دون حفظ أيّ تغيير).
+        """
         tenant = get_tenant(request)
         if not tenant:
             return Response({"error": "لا يوجد شركة (tenant)."}, status=status.HTTP_400_BAD_REQUEST)
-        ss = get_or_create_sales_settings(tenant)
-        from sales.services import resolve_default_account
+        require_perm(request, "sales.settings.manage", tenant=tenant)
 
         def resolve(code_prefixes=None, acc_type=None, name_kw=None, *, allow_parent=False):
             return resolve_default_account(
@@ -1888,29 +1909,58 @@ class SalesSettingsViewSet(viewsets.ViewSet):
                 allow_parent=allow_parent,
             )
 
-        # T-DEFACC: 1103 = المدينون التجاريون و1201 = الأراضي و1106 = دفعات
-        # الموردين — لم تكن أيٌّ منها صندوقاً ولا ذمم عملاء. الأكواد الصحيحة:
-        # النقدية/البنوك/صناديق النقدية للصندوق، والمدينون التجاريون للذمم.
-        #
-        # وكلُّها **أهدافُ ترحيل** فيُستبعد منها الحسابُ الأب (`allow_parent`
-        # افتراضُه هنا `False` عكسَ الدالّة نفسِها): مطابقةُ البادئة تُرجع الأبَ
-        # قبل فروعه، فكانت «استعادةُ الافتراضيات» تُثبّت رأسَ الشجرة هدفَ ترحيل.
-        # والذمّةُ `1103` وحدَها تُستثنى — أبٌ **مقصود**، أبُ حسابات الزبائن.
-        ss.default_cash_account = resolve(["1101", "1102", "1110"], "Asset", "صندوق")
-        ss.default_ar_account = resolve(
-            ["1103"], "Asset", "مدينون", allow_parent=True,
-        )
-        ss.default_revenue_account_product = resolve(["4101"], "Revenue", "مبيعات")
-        ss.default_revenue_account_service = (
-            resolve(["4102"], "Revenue", "خدمات") or ss.default_revenue_account_product
-        )
-        ss.default_inventory_account = resolve(["1104", "1105"], "Asset", "مخزون")
-        ss.default_cogs_account = resolve(["5101"], "Expense", "تكلفة")
-        ss.save(update_fields=[
-            "default_cash_account", "default_ar_account",
-            "default_revenue_account_product", "default_revenue_account_service",
-            "default_inventory_account", "default_cogs_account", "updated_at",
-        ])
+        with transaction.atomic():
+            ss = get_or_create_sales_settings(tenant)
+            before = _sales_settings_cogs_snapshot(ss)
+
+            # T-DEFACC: 1103 = المدينون التجاريون و1201 = الأراضي و1106 = دفعات
+            # الموردين — لم تكن أيٌّ منها صندوقاً ولا ذمم عملاء. الأكواد الصحيحة:
+            # النقدية/البنوك/صناديق النقدية للصندوق، والمدينون التجاريون للذمم.
+            #
+            # وكلُّها **أهدافُ ترحيل** فيُستبعد منها الحسابُ الأب (`allow_parent`
+            # افتراضُه هنا `False` عكسَ الدالّة نفسِها): مطابقةُ البادئة تُرجع الأبَ
+            # قبل فروعه، فكانت «استعادةُ الافتراضيات» تُثبّت رأسَ الشجرة هدفَ ترحيل.
+            # والذمّةُ `1103` وحدَها تُستثنى — أبٌ **مقصود**، أبُ حسابات الزبائن.
+            ss.default_cash_account = resolve(["1101", "1102", "1110"], "Asset", "صندوق")
+            ss.default_ar_account = resolve(
+                ["1103"], "Asset", "مدينون", allow_parent=True,
+            )
+            ss.default_revenue_account_product = resolve(["4101"], "Revenue", "مبيعات")
+            ss.default_revenue_account_service = (
+                resolve(["4102"], "Revenue", "خدمات") or ss.default_revenue_account_product
+            )
+            ss.default_inventory_account = resolve(["1104", "1105"], "Asset", "مخزون")
+            ss.default_cogs_account = resolve(["5101"], "Expense", "تكلفة")
+            err = cost_variance_account_error(
+                ss.cost_variance_account,
+                tenant_id=tenant.TenantID,
+                default_cogs_account=ss.default_cogs_account,
+            )
+            if ss.cogs_cost_method == COGS_METHOD_FIFO:
+                if err is not None:
+                    ss.cost_variance_account = None
+            elif ss.cogs_cost_method in (COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE):
+                if ss.cost_variance_account is None or err is not None:
+                    default_err = default_cost_variance_account_error(
+                        ss.default_cogs_account, tenant_id=tenant.TenantID,
+                    )
+                    if default_err is not None:
+                        raise DRFValidationError({"cost_variance_account": [default_err]})
+                    resolved_variance = resolve_default_cost_variance_account(
+                        ss, default_cogs_account=ss.default_cogs_account,
+                    )
+                    if resolved_variance is None:
+                        raise DRFValidationError(
+                            {"cost_variance_account": [COST_VARIANCE_RESOLVE_FAILED_ERROR]}
+                        )
+                    ss.cost_variance_account = resolved_variance
+            ss.save(update_fields=[
+                "default_cash_account", "default_ar_account",
+                "default_revenue_account_product", "default_revenue_account_service",
+                "default_inventory_account", "default_cogs_account",
+                "cost_variance_account", "updated_at",
+            ])
+        _log_sales_settings_cogs_changes(request, ss, before)
         return Response(SalesSettingsSerializer(ss).data)
 
 

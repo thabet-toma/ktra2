@@ -234,6 +234,10 @@ _MISSING_COGS_VARIANCE_ACCOUNT_ERROR = (
     "تعذّر إنشاء حساب فروقات التكلفة تلقائياً لعدم وجود حساب تكلفة مبيعات صالح؛ "
     "يرجى اختيار حساب الفروقات يدوياً."
 )
+COST_VARIANCE_RESOLVE_FAILED_ERROR = (
+    "تعذّر إنشاء أو استخدام حساب فروقات التكلفة الافتراضي؛ "
+    "يرجى اختيار حساب الفروقات يدوياً."
+)
 
 
 def _inspect_default_cost_variance_account(

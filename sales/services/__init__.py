@@ -15,6 +15,7 @@ from .foundation import (
     cost_variance_account_error,
     default_cost_variance_account_error,
     resolve_default_cost_variance_account,
+    COST_VARIANCE_RESOLVE_FAILED_ERROR,
     get_or_create_sales_settings,
     dormant_customers,
 )
@@ -172,6 +173,7 @@ __all__ = [
     "cost_variance_account_error",
     "default_cost_variance_account_error",
     "resolve_default_cost_variance_account",
+    "COST_VARIANCE_RESOLVE_FAILED_ERROR",
     "get_or_create_sales_settings",
     "dormant_customers",
     "SALES_STOCK_REFERENCE_TYPES",

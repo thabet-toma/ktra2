@@ -2,15 +2,21 @@
 
 `create_company` يبذر شجرة حسابات احترافية تلقائياً، فنعتمد عليها بدل إنشاء حسابات.
 """
+from decimal import Decimal
+
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from accounting.models import Account
+from accounting.models import Account, TaxRate
 from core.models import ActivityLog
+from partners.models import Partner
 from sales.models import SalesSettings
 from sales.services import (
+    COST_VARIANCE_RESOLVE_FAILED_ERROR,
     cost_variance_account_error,
+    default_cost_variance_account_error,
     get_or_create_sales_settings,
+    resolve_default_account,
     resolve_default_cost_variance_account,
 )
 from tenants.models import Currency, UserCompanyMembership
@@ -490,3 +496,299 @@ class SalesSettingsCogsCostMethodTest(APITestCase):
                 local_5150, tenant_id=self.tenant.TenantID, default_cogs_account=foreign_cogs,
             )
         )
+
+
+class SalesSettingsTenantScopeTest(APITestCase):
+    """SEC-SETTINGS-FK: عزل الفهارس الأجنبية وصلاحية restore-defaults وفحص حساب الفروقات."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="sec_set_owner", password="x")
+        Currency.objects.get_or_create(Code="ILS", defaults={"Name": "شيكل", "IsBaseCurrency": True})
+        cls.tenant = create_company("شركة أمان الإعدادات", cls.user)
+
+    def _auth(self, user=None, tenant=None):
+        self.client.force_authenticate(user=user or self.user)
+        return {"HTTP_X_TENANT_ID": str((tenant or self.tenant).TenantID)}
+
+    def _patch(self, payload, *, user=None, tenant=None):
+        return self.client.patch(
+            "/api/sales/settings/current/",
+            payload, format="json", **self._auth(user=user, tenant=tenant),
+        )
+
+    def _post_restore(self, *, user=None, tenant=None):
+        return self.client.post(
+            "/api/sales/settings/restore-defaults/",
+            {}, format="json", **self._auth(user=user, tenant=tenant),
+        )
+
+    @staticmethod
+    def _account_snapshot(ss):
+        return (
+            ss.default_cash_account_id,
+            ss.default_ar_account_id,
+            ss.default_revenue_account_product_id,
+            ss.default_revenue_account_service_id,
+            ss.default_inventory_account_id,
+            ss.default_cogs_account_id,
+            ss.cost_variance_account_id,
+        )
+
+    def test_sec_s1_patch_rejects_foreign_tenant_fk_fields(self):
+        self.client.get("/api/sales/settings/current/", **self._auth())
+        other_owner = User.objects.create_user(username="sec_other_owner", password="x")
+        other_tenant = create_company("شركة أجنبية للإعدادات", other_owner)
+
+        foreign_partner = Partner.objects.create(
+            tenant=other_tenant, name="عميل شركة أخرى", partner_type="Customer",
+        )
+        foreign_asset = Account.objects.create(
+            tenant=other_tenant, code="9101", name="أصل أجنبي",
+            account_type="Asset", is_active=True,
+        )
+        foreign_rev = Account.objects.create(
+            tenant=other_tenant, code="9401", name="إيراد أجنبي",
+            account_type="Revenue", is_active=True,
+        )
+        foreign_vat_acc = Account.objects.create(
+            tenant=other_tenant, code="9204", name="ضريبة أجنبية",
+            account_type="Liability", is_active=True,
+        )
+        foreign_tax = TaxRate.objects.create(
+            tenant=other_tenant, code="FVAT16", name="ضريبة أجنبية 16%",
+            rate=Decimal("16.00"), tax_account=foreign_vat_acc,
+            direction="sales", is_active=True,
+        )
+
+        foreign_targets = [
+            ("default_customer", foreign_partner.id),
+            ("default_revenue_account_product", foreign_rev.id),
+            ("default_revenue_account_service", foreign_rev.id),
+            ("default_cash_account", foreign_asset.id),
+            ("default_inventory_account", foreign_asset.id),
+            ("default_ar_account", foreign_asset.id),
+            ("vat_input_account", foreign_asset.id),
+            ("default_vat_rate", foreign_tax.id),
+        ]
+
+        for field, foreign_pk in foreign_targets:
+            with self.subTest(field=field):
+                before_id = getattr(SalesSettings.objects.get(tenant=self.tenant), f"{field}_id")
+                res = self._patch({field: foreign_pk})
+                self.assertEqual(res.status_code, 400, f"{field}: {res.content}")
+                self.assertIn(field, res.json(), f"{field}: {res.json()}")
+                self.assertEqual(res.data[field][0].code, "does_not_exist", f"{field}: {res.data}")
+                after_id = getattr(SalesSettings.objects.get(tenant=self.tenant), f"{field}_id")
+                self.assertEqual(after_id, before_id, f"{field} تغيّر رغم الرفض")
+
+    def test_sec_s2_patch_accepts_same_company_customer_and_vat_rate(self):
+        self.client.get("/api/sales/settings/current/", **self._auth())
+        local_customer = Partner.objects.create(
+            tenant=self.tenant, name="عميل محلي", partner_type="Customer",
+        )
+        vat_acc = Account.objects.get(tenant=self.tenant, code="2104")
+        local_tax = TaxRate.objects.create(
+            tenant=self.tenant, code="LVAT16", name="ضريبة محلية 16%",
+            rate=Decimal("16.00"), tax_account=vat_acc,
+            direction="sales", is_active=True,
+        )
+        res = self._patch({
+            "default_customer": local_customer.id,
+            "default_vat_rate": local_tax.id,
+        })
+        self.assertEqual(res.status_code, 200, res.content)
+        ss = SalesSettings.objects.get(tenant=self.tenant)
+        self.assertEqual(ss.default_customer_id, local_customer.id)
+        self.assertEqual(ss.default_vat_rate_id, local_tax.id)
+
+    def test_sec_s3_restore_defaults_requires_settings_manage_permission(self):
+        ss = get_or_create_sales_settings(self.tenant)
+        SalesSettings.objects.filter(pk=ss.pk).update(
+            default_cash_account=None,
+            default_cogs_account=None,
+        )
+        ss.refresh_from_db()
+        before_snapshot = self._account_snapshot(ss)
+
+        seller = User.objects.create_user(username="sec_seller_no_perm", password="x")
+        UserCompanyMembership.objects.create(user=seller, tenant=self.tenant, role="sales")
+        res = self._post_restore(user=seller)
+        self.assertEqual(res.status_code, 403, res.content)
+
+        ss.refresh_from_db()
+        after_snapshot = self._account_snapshot(ss)
+        self.assertEqual(after_snapshot, before_snapshot)
+
+    def test_sec_s4_restore_defaults_standard_replaces_invalid_variance_and_logs(self):
+        ss = get_or_create_sales_settings(self.tenant)
+        expected_cogs = resolve_default_account(
+            self.tenant.TenantID, ["5101"], "Expense", "تكلفة", allow_parent=False,
+        )
+        self.assertIsNotNone(expected_cogs)
+        SalesSettings.objects.filter(pk=ss.pk).update(
+            cogs_cost_method="standard",
+            cost_variance_account=expected_cogs,
+        )
+        ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").delete()
+
+        res = self._post_restore()
+        self.assertEqual(res.status_code, 200, res.content)
+
+        ss.refresh_from_db()
+        self.assertEqual(ss.default_cogs_account_id, expected_cogs.id)
+        self.assertIsNotNone(ss.cost_variance_account_id)
+        self.assertNotEqual(ss.cost_variance_account_id, ss.default_cogs_account_id)
+        self.assertIsNone(
+            cost_variance_account_error(
+                ss.cost_variance_account,
+                tenant_id=self.tenant.TenantID,
+                default_cogs_account=ss.default_cogs_account,
+            )
+        )
+
+        logs = ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_settings", action="update",
+        )
+        self.assertEqual(logs.count(), 1)
+        changes = logs.first().metadata.get("changes") or []
+        by_field = {c["field"]: c for c in changes}
+        self.assertIn("cost_variance_account", by_field)
+        self.assertIn(expected_cogs.code, by_field["cost_variance_account"]["old"])
+        self.assertIn(ss.cost_variance_account.code, by_field["cost_variance_account"]["new"])
+
+    def test_sec_s5_restore_defaults_fifo_clears_invalid_variance_account(self):
+        ss = get_or_create_sales_settings(self.tenant)
+        expected_cogs = resolve_default_account(
+            self.tenant.TenantID, ["5101"], "Expense", "تكلفة", allow_parent=False,
+        )
+        self.assertIsNotNone(expected_cogs)
+        SalesSettings.objects.filter(pk=ss.pk).update(
+            cogs_cost_method="fifo",
+            cost_variance_account=expected_cogs,
+        )
+        ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").delete()
+
+        res = self._post_restore()
+        self.assertEqual(res.status_code, 200, res.content)
+        ss.refresh_from_db()
+        self.assertIsNone(ss.cost_variance_account_id)
+        logs = ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_settings", action="update",
+        )
+        self.assertEqual(logs.count(), 1)
+        changes = logs.first().metadata.get("changes") or []
+        by_field = {c["field"]: c for c in changes}
+        self.assertIn("cost_variance_account", by_field)
+        self.assertEqual(by_field["cost_variance_account"]["new"], "")
+
+    def test_sec_s6_restore_defaults_standard_keeps_valid_variance_without_log(self):
+        ss = get_or_create_sales_settings(self.tenant)
+        acc_5 = Account.objects.get(tenant=self.tenant, code="5")
+        valid_variance = Account.objects.create(
+            tenant=self.tenant, code="5155", name="فروقات تكلفة صالحة",
+            account_type="Expense", parent=acc_5, is_active=True,
+        )
+        SalesSettings.objects.filter(pk=ss.pk).update(
+            cogs_cost_method="standard",
+            cost_variance_account=valid_variance,
+        )
+        ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").delete()
+
+        res = self._post_restore()
+        self.assertEqual(res.status_code, 200, res.content)
+        ss.refresh_from_db()
+        self.assertEqual(ss.cost_variance_account_id, valid_variance.id)
+        self.assertEqual(
+            ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").count(),
+            0,
+        )
+
+    def test_sec_s7_restore_defaults_standard_400_and_saves_nothing_when_default_variance_ineligible(self):
+        ss = get_or_create_sales_settings(self.tenant)
+        acc_5 = Account.objects.get(tenant=self.tenant, code="5")
+        Account.objects.create(
+            tenant=self.tenant, code="5190", name="حساب 5190 معطل",
+            account_type="Expense", parent=acc_5, is_active=False,
+        )
+        acc_4 = Account.objects.get(tenant=self.tenant, code="4")
+        custom_rev = Account.objects.create(
+            tenant=self.tenant, code="4199", name="إيراد مخصص",
+            account_type="Revenue", parent=acc_4, is_active=True,
+        )
+        SalesSettings.objects.filter(pk=ss.pk).update(
+            default_cash_account=None,
+            default_ar_account=None,
+            default_revenue_account_product=custom_rev,
+            default_revenue_account_service=None,
+            default_inventory_account=None,
+            default_cogs_account=None,
+            cost_variance_account=None,
+            cogs_cost_method="standard",
+        )
+        ss.refresh_from_db()
+        before_accounts = self._account_snapshot(ss)
+        account_count_before = Account.objects.filter(tenant=self.tenant).count()
+        ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").delete()
+
+        resolved_cogs = resolve_default_account(
+            self.tenant.TenantID, ["5101"], "Expense", "تكلفة", allow_parent=False,
+        )
+        expected_err = default_cost_variance_account_error(
+            resolved_cogs, tenant_id=self.tenant.TenantID,
+        )
+        self.assertIsNotNone(expected_err)
+        self.assertNotEqual(expected_err, COST_VARIANCE_RESOLVE_FAILED_ERROR)
+
+        res = self._post_restore()
+        self.assertEqual(res.status_code, 400, res.content)
+        body = res.json()
+        self.assertIn("cost_variance_account", body, body)
+        self.assertEqual(body["cost_variance_account"], [expected_err])
+
+        ss.refresh_from_db()
+        after_accounts = self._account_snapshot(ss)
+        self.assertEqual(after_accounts, before_accounts)
+        # حارس انحدار: الفحص المحدّد (`default_cost_variance_account_error`) يرفض `5190` المعطّل قبل بلوغ المحلّل، فلا يُنشأ حساب اليوم.
+        self.assertEqual(Account.objects.filter(tenant=self.tenant).count(), account_count_before)
+        self.assertEqual(
+            ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").count(),
+            0,
+        )
+
+    def test_sec_s8_restore_defaults_last_purchase_replaces_invalid_variance_and_logs(self):
+        ss = get_or_create_sales_settings(self.tenant)
+        expected_cogs = resolve_default_account(
+            self.tenant.TenantID, ["5101"], "Expense", "تكلفة", allow_parent=False,
+        )
+        self.assertIsNotNone(expected_cogs)
+        SalesSettings.objects.filter(pk=ss.pk).update(
+            cogs_cost_method="last_purchase",
+            cost_variance_account=expected_cogs,
+        )
+        ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").delete()
+
+        res = self._post_restore()
+        self.assertEqual(res.status_code, 200, res.content)
+
+        ss.refresh_from_db()
+        self.assertEqual(ss.default_cogs_account_id, expected_cogs.id)
+        self.assertIsNotNone(ss.cost_variance_account_id)
+        self.assertNotEqual(ss.cost_variance_account_id, ss.default_cogs_account_id)
+        self.assertIsNone(
+            cost_variance_account_error(
+                ss.cost_variance_account,
+                tenant_id=self.tenant.TenantID,
+                default_cogs_account=ss.default_cogs_account,
+            )
+        )
+
+        logs = ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_settings", action="update",
+        )
+        self.assertEqual(logs.count(), 1)
+        changes = logs.first().metadata.get("changes") or []
+        by_field = {c["field"]: c for c in changes}
+        self.assertIn("cost_variance_account", by_field)
+        self.assertIn(expected_cogs.code, by_field["cost_variance_account"]["old"])
+        self.assertIn(ss.cost_variance_account.code, by_field["cost_variance_account"]["new"])
