@@ -801,6 +801,8 @@ export type InvoiceProfitsResponse = {
     cost: string;
     profit: string;
     margin_pct: string;
+    cost_variance: string | null;
+    gross_profit: string | null;
   };
 };
 

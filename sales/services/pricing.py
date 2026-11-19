@@ -10,10 +10,10 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
-from django.db.models.functions import Coalesce
 
 from accounting.models import Account, JournalLine
 from accounting.services import (
+    account_period_net,
     convert_amount,
     create_audit_log,
     post_journal,
@@ -24,7 +24,10 @@ from accounting.services import (
 )
 # حركات المخزون المنسوبة لفاتورة بيع (`SALE` وإذن الصرف `STOCK_ISSUE`؛ قيد التسليم
 # `SALES_DELIVERY_COGS` قيدٌ لا حركة): التعريف المشترك في `inventory/cogs_method.py` (`SALE_ISSUE_REFERENCE_TYPES`).
-from inventory.cogs_method import SALE_ISSUE_REFERENCE_TYPES as SALES_STOCK_REFERENCE_TYPES
+from inventory.cogs_method import (
+    SALE_ISSUE_REFERENCE_TYPES as SALES_STOCK_REFERENCE_TYPES,
+    effective_cogs_expression,
+)
 from inventory.models import Product, StockMovement
 from inventory.serials import (
     consume_sales_serials,
@@ -79,7 +82,7 @@ def sales_cogs_map(
             reference_id__in=ids,
         )
         .values("reference_id", "product_id")
-        .annotate(cost=Sum(Coalesce("cogs_cost", "total_cost")), qty=Sum("quantity"))
+        .annotate(cost=Sum(effective_cogs_expression()), qty=Sum("quantity"))
     )
     return {
         (r["reference_id"], r["product_id"]): {
@@ -173,6 +176,11 @@ def invoice_profits(
     محصور بالشركة (والفرع غير الرئيسي إن مُرّر) وبفواتير البيع (لا مراجيع)، مع
     التسامح مع الصفوف القديمة بلا نوع (null/"") التي لا تنشأ إلا من مسارات SQL
     خام سابقة لهجرة 0012 — تُعامَل مبيعاتٍ كما يعاملها قسم التقارير.
+
+    يُضيف في `totals` مفتاحَي `cost_variance` (صافي حركة حساب
+    `SalesSettings.cost_variance_account` للفترة والفرع — رصيد الحساب الكلّي،
+    فيشمل عكوسات مرتجعات البيع وأيّ قيودٍ يدويةٍ فيه) و`gross_profit`
+    (`profit - cost_variance`)؛ وكلاهما `None` عند التصفية بـ`customer_id`.
     """
     qs = SalesInvoice.objects.filter(
         tenant_id=tenant_id,
@@ -224,6 +232,24 @@ def invoice_profits(
 
     tot_profit = (tot_rev - tot_cost).quantize(DEC)
     tot_margin = (tot_profit / tot_rev * 100).quantize(DEC) if tot_rev > 0 else Decimal("0")
+    if customer_id:
+        cost_variance_str = None
+        gross_profit_str = None
+    else:
+        variance_account_id = (
+            SalesSettings.objects.filter(tenant_id=tenant_id)
+            .values_list("cost_variance_account_id", flat=True)
+            .first()
+        )
+        variance = account_period_net(
+            tenant_id=tenant_id,
+            account_id=variance_account_id,
+            date_from=date_from,
+            date_to=date_to,
+            branch=branch,
+        )
+        cost_variance_str = str(variance.quantize(DEC))
+        gross_profit_str = str((tot_profit - variance).quantize(DEC))
     return {
         "rows": rows,
         "totals": {
@@ -232,6 +258,8 @@ def invoice_profits(
             "cost": str(tot_cost.quantize(DEC)),
             "profit": str(tot_profit),
             "margin_pct": str(tot_margin),
+            "cost_variance": cost_variance_str,
+            "gross_profit": gross_profit_str,
         },
     }
 

@@ -161,3 +161,86 @@ def test_cogs_map_is_tenant_scoped(env):
     other_owner = User.objects.create_user(username="other-map", password="x")
     other = create_company("شركة أخرى للخريطة", other_owner)
     assert sales_cogs_map(tenant_id=other.TenantID, invoice_ids=[inv.id]) == {}
+
+
+# ── M1B-4: سطر فروقات التكلفة ومجمل الربح بالتكلفة الفعلية ───────────────
+
+def test_invoice_profits_standard_variance_and_gross_profit(env):
+    """T3: standard بسعر ثابت 11 (8@10 + 4@16، بيع 10 بـ200): لقطة 110، فعلي 112، فرق +2."""
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+
+    tenant, cur, customer, snap_product, ss = setup_purchase_case(
+        env, method="standard", standard_cost=Decimal("11"),
+    )
+    _post_sale(tenant, cur, customer, snap_product, number="VAR-STD", qty=10, price=20)
+
+    data = invoice_profits(
+        tenant_id=tenant.TenantID, date_from="2026-06-01", date_to="2026-06-30",
+    )
+    totals = data["totals"]
+    assert totals["revenue"] == "200.00"
+    assert totals["cost"] == "110.00"
+    assert totals["profit"] == "90.00"
+    assert totals["cost_variance"] == "2.00"
+    assert totals["gross_profit"] == "88.00"
+
+
+def test_invoice_profits_last_purchase_negative_variance(env):
+    """T4: last_purchase (16): لقطة 160، فعلي 112، فرق −48، مجمل الربح 88 = 200 − 112."""
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+
+    tenant, cur, customer, snap_product, ss = setup_purchase_case(
+        env, method="last_purchase",
+    )
+    _post_sale(tenant, cur, customer, snap_product, number="VAR-LP", qty=10, price=20)
+
+    data = invoice_profits(
+        tenant_id=tenant.TenantID, date_from="2026-06-01", date_to="2026-06-30",
+    )
+    totals = data["totals"]
+    assert totals["revenue"] == "200.00"
+    assert totals["cost"] == "160.00"
+    assert totals["profit"] == "40.00"
+    assert totals["cost_variance"] == "-48.00"
+    assert totals["gross_profit"] == "88.00"
+
+
+def test_invoice_profits_customer_filter_nulls_variance_and_missing_account_zeroes(env):
+    """T5: تمرير customer_id يجعل الفروقات ومجمل الربح None؛ وغياب الحساب يعيد 0.00."""
+    from sales.models import SalesSettings
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+
+    tenant, cur, customer, snap_product, ss = setup_purchase_case(
+        env, method="standard", standard_cost=Decimal("11"),
+    )
+    _post_sale(tenant, cur, customer, snap_product, number="VAR-CUST", qty=10, price=20)
+
+    filtered = invoice_profits(
+        tenant_id=tenant.TenantID, customer_id=customer.id,
+        date_from="2026-06-01", date_to="2026-06-30",
+    )
+    assert filtered["totals"]["cost_variance"] is None
+    assert filtered["totals"]["gross_profit"] is None
+
+    SalesSettings.objects.filter(tenant=tenant).update(cost_variance_account=None)
+    no_acct = invoice_profits(
+        tenant_id=tenant.TenantID, date_from="2026-06-01", date_to="2026-06-30",
+    )
+    assert no_acct["totals"]["cost_variance"] == "0.00"
+    assert no_acct["totals"]["gross_profit"] == no_acct["totals"]["profit"]
+
+
+def test_invoice_profits_without_sales_settings_row_zeroes_variance(env):
+    """T5b: شركة بلا صفّ SalesSettings إطلاقاً ⇒ cost_variance == 0.00 وgross_profit == profit."""
+    from sales.models import SalesSettings
+
+    tenant, cur, customer, product = env
+    _post_sale(tenant, cur, customer, product, number="NO-SS-1", qty=2, price=50)
+    SalesSettings.objects.filter(tenant=tenant).delete()
+    assert not SalesSettings.objects.filter(tenant=tenant).exists()
+
+    data = invoice_profits(
+        tenant_id=tenant.TenantID, date_from="2026-06-01", date_to="2026-06-30",
+    )
+    assert data["totals"]["cost_variance"] == "0.00"
+    assert data["totals"]["gross_profit"] == data["totals"]["profit"]

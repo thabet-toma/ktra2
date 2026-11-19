@@ -354,3 +354,148 @@ class StockByDimensionReportTest(APITestCase):
             "/api/reports/reserved-stock/drill/", self._params(), **self._headers())
         self.assertEqual(res.status_code, 400, res.content)
         self.assertIn("لا يُنقَّب", res.data["error"])
+
+
+class StockByDimensionCogsSnapshotTest(APITestCase):
+    """T1 & T2: ربح «حركة المخزون حسب بُعد» يقرأ لقطة تكلفة البيع (`cogs_cost`)
+    مع السقوط إلى `total_cost` عندما تكون اللقطة فارغة، مع بقاء `cost_out` على الفعلي."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from accounting.models import Account
+        from accounting.services import create_fiscal_year
+        from inventory.services import record_stock_movement
+        from sales.models import SalesSettings
+        from sales.services import post_sales_invoice
+
+        cls.user = User.objects.create_user(username="dim-cogs-snap", password="x")
+        cls.currency, _ = Currency.objects.get_or_create(
+            Code="ILS", defaults={"Name": "شيكل", "Symbol": "₪", "IsBaseCurrency": True})
+        cls.tenant = create_company("شركة لقطة البُعد", cls.user)
+        create_fiscal_year(cls.tenant, 2026)
+        cls.warehouse = Warehouse.objects.get(tenant=cls.tenant, is_default=True)
+
+        ar = Account.objects.create(
+            tenant=cls.tenant, code="1101-DIM", name="ذمم", account_type="Asset", is_active=True)
+        rev = Account.objects.create(
+            tenant=cls.tenant, code="4001-DIM", name="مبيعات", account_type="Revenue", is_active=True)
+        cogs = Account.objects.create(
+            tenant=cls.tenant, code="5001-DIM", name="تكلفة", account_type="Expense", is_active=True)
+        inv = Account.objects.create(
+            tenant=cls.tenant, code="1104-DIM", name="مخزون", account_type="Asset", is_active=True)
+        variance = Account.objects.create(
+            tenant=cls.tenant, code="5100-DIM", name="فروقات", account_type="Expense", is_active=True)
+        SalesSettings.objects.update_or_create(
+            tenant=cls.tenant,
+            defaults={
+                "default_revenue_account_product": rev,
+                "default_cogs_account": cogs,
+                "default_inventory_account": inv,
+                "cogs_cost_method": "standard",
+                "cost_variance_account": variance,
+            },
+        )
+        cls.customer = Partner.objects.create(
+            tenant=cls.tenant, name="زبون اللقطة", partner_type="Customer", linked_account=ar)
+
+        # T1: 8@10 + 4@16، ثم بيع 10 بسعر بيع 20 (إيراد 200) وبسعر ثابت 11 (لقطة 110، فعلي 112).
+        cls.std_product = Product.objects.create(
+            tenant=cls.tenant, sku="DIM-STD", name_ar="منتج معياري",
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+            standard_cost=Decimal("11"),
+        )
+        record_stock_movement(
+            product=cls.std_product, movement_type="IN", quantity=Decimal("8"),
+            unit_cost=Decimal("10"), reference_type="PURCHASE_INVOICE", reference_id=1001,
+            movement_date="2026-06-10", tenant=cls.tenant, warehouse=cls.warehouse,
+        )
+        record_stock_movement(
+            product=cls.std_product, movement_type="IN", quantity=Decimal("4"),
+            unit_cost=Decimal("16"), reference_type="PURCHASE_INVOICE", reference_id=1002,
+            movement_date="2026-06-12", tenant=cls.tenant, warehouse=cls.warehouse,
+        )
+        cls.std_sale = SalesInvoice.objects.create(
+            tenant=cls.tenant, invoice_number="SI-DIM-STD", customer=cls.customer,
+            currency=cls.currency, invoice_date="2026-06-15",
+            invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=True,
+        )
+        SalesInvoiceLine.objects.create(
+            tenant=cls.tenant, invoice=cls.std_sale, product=cls.std_product,
+            quantity=Decimal("10"), unit_price=Decimal("20"),
+        )
+        post_sales_invoice(cls.std_sale)
+
+        # T2: حركة بيع قديمة بلا cogs_cost (NULL) — تسقط إلى total_cost.
+        cls.legacy_product = Product.objects.create(
+            tenant=cls.tenant, sku="DIM-LEG", name_ar="منتج قديم",
+            quantity_on_hand=Decimal("10"), avg_cost=Decimal("12"),
+        )
+        cls.legacy_sale = SalesInvoice.objects.create(
+            tenant=cls.tenant, invoice_number="SI-DIM-LEG", customer=cls.customer,
+            currency=cls.currency, invoice_date="2026-06-16",
+            invoice_type=SalesInvoice.INVOICE_CREDIT,
+            status=SalesInvoice.STATUS_POSTED,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+            subtotal_excl_tax=Decimal("200"), grand_total=Decimal("200"),
+        )
+        SalesInvoiceLine.objects.create(
+            tenant=cls.tenant, invoice=cls.legacy_sale, product=cls.legacy_product,
+            quantity=Decimal("5"), unit_price=Decimal("40"),
+            line_total_excl_tax=Decimal("200"),
+        )
+        StockMovement.objects.create(
+            tenant=cls.tenant, product=cls.legacy_product, movement_type="OUT",
+            quantity=Decimal("5"), unit_cost=Decimal("12"), total_cost=Decimal("60"),
+            cogs_cost=None, cogs_method=None,
+            reference_type="SALE", reference_id=cls.legacy_sale.id,
+            partner=cls.customer, warehouse=cls.warehouse, movement_date="2026-06-16",
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    def _headers(self):
+        return {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def test_standard_sale_uses_snapshot_profit_while_cost_out_stays_actual(self):
+        """T1: صفّ التقرير وصفّ التنقيب يقرآن ربح اللقطة (200 − 110 = 90) ويبقى cost_out الفعلي (112)."""
+        params = {"from": "2026-06-01", "to": "2026-06-30", "group_by": "product"}
+        res = self.client.get("/api/reports/stock-by-dimension/", params, **self._headers())
+        self.assertEqual(res.status_code, 200, res.content)
+        row = next(r for r in res.data["rows"] if r["sku"] == "DIM-STD")
+        self.assertEqual(Decimal(row["revenue"]), Decimal("200.00"))
+        self.assertEqual(Decimal(row["cost_out"]), Decimal("112.00"))
+        self.assertEqual(Decimal(row["profit"]), Decimal("90.00"))
+
+        drill_res = self.client.get(
+            "/api/reports/stock-by-dimension/drill/",
+            {**params, "dim_key": row["dim_key"], "row_product": row["row_product"]},
+            **self._headers(),
+        )
+        self.assertEqual(drill_res.status_code, 200, drill_res.content)
+        sale_drill = next(
+            r for r in drill_res.data["rows"] if Decimal(r["qty_out"]) == Decimal("10")
+        )
+        self.assertEqual(Decimal(sale_drill["cost_out"]), Decimal("112.00"))
+        self.assertEqual(Decimal(sale_drill["revenue"]), Decimal("200.00"))
+        self.assertEqual(Decimal(sale_drill["profit"]), Decimal("90.00"))
+
+    def test_legacy_movement_null_cogs_cost_falls_back_to_total_cost(self):
+        """T2: حركة قديمة بـ cogs_cost=NULL تسقط إلى total_cost في التقرير والتنقيب."""
+        params = {"from": "2026-06-01", "to": "2026-06-30", "group_by": "product"}
+        res = self.client.get("/api/reports/stock-by-dimension/", params, **self._headers())
+        self.assertEqual(res.status_code, 200, res.content)
+        row = next(r for r in res.data["rows"] if r["sku"] == "DIM-LEG")
+        self.assertEqual(Decimal(row["revenue"]), Decimal("200.00"))
+        self.assertEqual(Decimal(row["cost_out"]), Decimal("60.00"))
+        self.assertEqual(Decimal(row["profit"]), Decimal("140.00"))
+
+        drill_res = self.client.get(
+            "/api/reports/stock-by-dimension/drill/",
+            {**params, "dim_key": row["dim_key"], "row_product": row["row_product"]},
+            **self._headers(),
+        )
+        self.assertEqual(drill_res.status_code, 200, drill_res.content)
+        sale_drill = drill_res.data["rows"][0]
+        self.assertEqual(Decimal(sale_drill["cost_out"]), Decimal("60.00"))
+        self.assertEqual(Decimal(sale_drill["profit"]), Decimal("140.00"))

@@ -213,3 +213,10 @@
 | 2026-11-19 | M1B-3b fix1 | تصليح (Hydrogen high عبر agy): R1 التقريب الأصلي لكل موضع + فصل الفروقات، `build_cogs_adjustment_lines` عام في `cogs_method`، حدّ importlinter، `reconcile_cogs` يتخطّى المنتج بخطأ، معاينة WAC تعرض الحصص، حذف `atomic` الزائد ← قراءة الفرق (مطابق) | ~40 دقيقة | inventory 613 · sales 666 · logistics 823 · accounting 456 passed؛ الهجرات No changes؛ مراجعتان نهائيتان تعملان |
 | 2026-11-19 | M1B-3b مراجعة نهائية | Standards + Spec (Opus subagents، متوازيان) على الحالة بعد fix1 | ~3–5 دقائق | لا blocker/major؛ Spec: 1 minor + 3 nit؛ Standards: 2 minor + 2 nit؛ 6 مقبولة، 1 مرفوضة (F5) |
 | 2026-11-19 | M1B-3b fix2 | Hydrogen (agy, high, skip-perms) | المحاولة 1 فشلت (agy backend، 10 ث)؛ المحاولة 2 ~10 دقائق 13:23–13:33 | G1–G5 + TM1؛ inventory 613، sales 667 passed؛ docs-freshness 1 failed (ضوضاء `.agents/worktrees`) |
+| 2026-11-19 | بوّابة M1B-3b النهائية | المنسّق (gate.py معزول) | 5:21 | 8086 passed، 1 failed بيئي (`PaperAmountsPayloadTest`)؛ إيداع `2181947f` |
+| 2026-11-19 | قارئ M1B-4 | Hydrogen high (agy `--read-only`) | — | 8 أسئلة، أجاب كاملاً؛ `readOnlyViolation` كاذب من تعديلات السجلّ |
+| 2026-11-19 | منفّذ M1B-4 | Hydrogen high (agy skip-permissions) | — | اكتمل؛ T1–T9 + اختبار `invoice_date=None`؛ بوّاباته المبلَّغة خضراء عدا ضجيج core المعروف |
+| 2026-11-19 | مراجعة Spec M1B-4 | Opus (وكيل فرعي) | ~9 د | مطابق؛ 3 minor + 2 nit (الوضع الداكن، اختبار العزل، تحفّظ المرتجعات) |
+| 2026-11-19 | مراجعة Standards M1B-4 | Opus (وكيل فرعي) | ~10 د | 1 major مرفوض (محسوم ← M2)، 6 minor، 7 nit؛ لا خرق ثوابت |
+| 2026-11-19 | مراجعة Spec نهائية M1B-4 | Opus subagent | ~4.5د، 29 أداة | مطابق؛ 5 nits |
+| 2026-11-19 | مراجعة Standards نهائية M1B-4 | Opus subagent | ~9د، 35 أداة | 4 minor + 6 nits؛ عقد import-linter مكسور سابقاً |

@@ -1268,6 +1268,43 @@ def vat_period_totals(tenant_id: int, period_from, period_to, *, posted_only: bo
     }
 
 
+def account_period_net(
+    *,
+    tenant_id: int,
+    account_id: int | None,
+    date_from=None,
+    date_to=None,
+    branch=None,
+) -> Decimal:
+    """صافي حركة حسابٍ من الدفتر لفترة: مجموع (المدين − الدائن) بالعملة الأساسية.
+
+    يقرأ أسطر `JournalLine` للقيود المرحَّلة وحدها (`journal__is_posted=True`)
+    المحصورة بالشركة والحساب وبحدَّي التاريخ الاختياريَّين؛ ويُقيَّد بـ
+    `journal__branch=branch` متى مُرِّر فرعٌ غير رئيسي فقط. يُعيد `Decimal("0.00")`
+    عند غياب الحساب (`None`) أو غياب الأسطر المطابقة.
+    """
+    if not account_id:
+        return Decimal("0.00")
+    line_filters: dict = {
+        "tenant_id": tenant_id,
+        "account_id": account_id,
+        "journal__is_posted": True,
+    }
+    if date_from:
+        line_filters["journal__transaction_date__gte"] = date_from
+    if date_to:
+        line_filters["journal__transaction_date__lte"] = date_to
+    if branch is not None and not getattr(branch, "is_main", False):
+        line_filters["journal__branch"] = branch
+
+    agg = JournalLine.objects.filter(**line_filters).aggregate(
+        dr=Sum("base_debit"), cr=Sum("base_credit"),
+    )
+    dr = Decimal(agg["dr"] or 0).quantize(Decimal("0.01"))
+    cr = Decimal(agg["cr"] or 0).quantize(Decimal("0.01"))
+    return (dr - cr).quantize(Decimal("0.01"))
+
+
 def assert_no_final_vat_statement(tenant_id, transaction_date, document_label="", *, posting=False):
     """يمنع ترحيل مستندٍ أو فكّ ترحيله بتاريخٍ داخل فترة كشف ض.ق.م `final` (issue #79 · A2-1).
 

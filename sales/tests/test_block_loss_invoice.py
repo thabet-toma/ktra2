@@ -1,8 +1,9 @@
 """إعداد «فاتورة البيع بخسارة» (W1) — عند ضبط `SalesSettings.loss_invoice_policy` على
 `block`، يُرفض **حفظ أو ترحيل** فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع <
-متوسط التكلفة)، حتى لو كان إجمالي الفاتورة رابحاً. `allow` = السماح بالحفظ والترحيل
-بخسارة. المراجيع مُعفاة. `allow` افتراضياً فلا يؤثر على السلوك القائم. الحالة الوسطى
-`save_only` في `test_stock_loss_policies.py`.
+التكلفة المتوقَّعة لطريقة تكلفة المبيعات مع السقوط إلى متوسط التكلفة)، حتى لو كان
+إجمالي الفاتورة رابحاً. `allow` = السماح بالحفظ والترحيل بخسارة. المراجيع مُعفاة.
+`allow` افتراضياً فلا يؤثر على السلوك القائم. الحالة الوسطى `save_only` في
+`test_stock_loss_policies.py`.
 """
 from decimal import Decimal
 
@@ -89,13 +90,14 @@ def test_loss_invoice_allowed_when_setting_off(env):
 # ── W1: الحارس على مستوى السطر + عند الحفظ (لا الترحيل فقط) ──
 
 def _save_via_serializer(tenant, customer, product, *, lines, number,
-                         kind=SalesInvoice.INVOICE_KIND_SALE):
+                         kind=SalesInvoice.INVOICE_KIND_SALE,
+                         date="2026-06-15"):
     """يحفظ فاتورة عبر السيريالايزر (مسار الحفظ الفعلي: create)."""
     data = {
         "invoice_number": number,
         "customer": customer.id,
         "currency": tenant._test_currency.pk,
-        "invoice_date": "2026-06-15",
+        "invoice_date": date,
         "invoice_type": SalesInvoice.INVOICE_CREDIT,
         "stock_on_post": False,
         "invoice_kind": kind,
@@ -145,3 +147,146 @@ def test_return_with_loss_line_saved_when_on(env):
         number="RET-ON-1",
     )
     assert SalesInvoice.objects.filter(pk=inv.pk).exists()
+
+
+# ── M1B-4: حارس الخسارة يقارن بالتكلفة المتوقَّعة للطريقة ─────────────────
+
+def test_loss_guard_uses_standard_cost_instead_of_avg_cost(env):
+    """T7: standard_cost أعلى من السعر مع avg_cost أدنى منه ⇒ يُمنع؛ والعكس يُمرَّر."""
+    tenant, customer, product = env
+    SalesSettings.objects.update_or_create(
+        tenant=tenant,
+        defaults={
+            "loss_invoice_policy": SalesSettings.POLICY_BLOCK,
+            "cogs_cost_method": "standard",
+        },
+    )
+
+    # standard_cost (120) > unit_price (100) بينما avg_cost (80) < unit_price (100) ⇒ يمنع
+    product.avg_cost = Decimal("80")
+    product.standard_cost = Decimal("120")
+    product.save(update_fields=["avg_cost", "standard_cost"])
+
+    with pytest.raises(ValidationError, match="تحتوي بنداً يُباع بخسارة"):
+        _save_via_serializer(
+            tenant, customer, product,
+            lines=[{"product": product.id, "quantity": "1", "unit_price": "100"}],
+            number="STD-BLK-1",
+        )
+    inv_blk = _invoice(tenant, customer, product, unit_price=100, number="STD-BLK-POST")
+    with pytest.raises(ValidationError, match="تحتوي بنداً يُباع بخسارة"):
+        post_sales_invoice(inv_blk)
+
+    # العكس: standard_cost (80) < unit_price (100) بينما avg_cost (120) > unit_price (100) ⇒ يمرّ
+    product.avg_cost = Decimal("120")
+    product.standard_cost = Decimal("80")
+    product.save(update_fields=["avg_cost", "standard_cost"])
+
+    saved = _save_via_serializer(
+        tenant, customer, product,
+        lines=[{"product": product.id, "quantity": "1", "unit_price": "100"}],
+        number="STD-PASS-1",
+    )
+    post_sales_invoice(saved)
+    saved.refresh_from_db()
+    assert saved.status == SalesInvoice.STATUS_POSTED
+
+
+def test_loss_guard_last_purchase_uses_layer_on_or_before_invoice_date(env):
+    """T8: last_purchase يقرأ أحدث طبقة شراء بتاريخ ≤ تاريخ الفاتورة ويتجاهل اللاحقة."""
+    from inventory.tests.test_unpost_provisional_reconciliation import _receive
+
+    tenant, customer, product = env
+    SalesSettings.objects.update_or_create(
+        tenant=tenant,
+        defaults={
+            "loss_invoice_policy": SalesSettings.POLICY_BLOCK,
+            "cogs_cost_method": "last_purchase",
+        },
+    )
+
+    # طبقة سابقة لتاريخ الفاتورة (2026-06-15) بتكلفة 120، وطبقة لاحقة (2026-06-20) بتكلفة 50
+    _receive(product, "5", "120", 3001, date="2026-06-10")
+    _receive(product, "5", "50", 3002, date="2026-06-20")
+    product.avg_cost = Decimal("50")
+    product.save(update_fields=["avg_cost"])
+
+    # تاريخ الفاتورة 2026-06-15 ⇒ يقرأ 120 (ويتجاهل 50 اللاحقة) ⇒ يمنع بيع 100
+    with pytest.raises(ValidationError, match="تحتوي بنداً يُباع بخسارة"):
+        _save_via_serializer(
+            tenant, customer, product,
+            lines=[{"product": product.id, "quantity": "1", "unit_price": "100"}],
+            number="LP-BLK-1",
+        )
+
+    # تاريخ الفاتورة 2026-06-25 ⇒ يقرأ 50 ⇒ يمرّ
+    inv_pass = _save_via_serializer(
+        tenant, customer, product,
+        lines=[{"product": product.id, "quantity": "1", "unit_price": "100"}],
+        number="LP-PASS-1",
+        date="2026-06-25",
+    )
+    assert inv_pass.pk is not None
+
+
+def test_loss_guard_standard_without_standard_cost_falls_back_to_avg_cost(env):
+    """T9: standard مع standard_cost=None يسقط إلى avg_cost."""
+    tenant, customer, product = env
+    SalesSettings.objects.update_or_create(
+        tenant=tenant,
+        defaults={
+            "loss_invoice_policy": SalesSettings.POLICY_BLOCK,
+            "cogs_cost_method": "standard",
+        },
+    )
+
+    product.standard_cost = None
+    product.avg_cost = Decimal("120")
+    product.save(update_fields=["standard_cost", "avg_cost"])
+    with pytest.raises(ValidationError, match="تحتوي بنداً يُباع بخسارة"):
+        _save_via_serializer(
+            tenant, customer, product,
+            lines=[{"product": product.id, "quantity": "1", "unit_price": "100"}],
+            number="STD-NONE-BLK",
+        )
+
+    product.avg_cost = Decimal("80")
+    product.save(update_fields=["avg_cost"])
+    inv = _save_via_serializer(
+        tenant, customer, product,
+        lines=[{"product": product.id, "quantity": "1", "unit_price": "100"}],
+        number="STD-NONE-PASS",
+    )
+    assert inv.pk is not None
+
+
+def test_loss_guard_last_purchase_handles_none_invoice_date(env):
+    """invoice_date=None في last_purchase يسقط إلى localdate() بدل تعثّر ORM بـ layer_date__lte=None."""
+    from django.utils.timezone import localdate
+    from inventory.tests.test_unpost_provisional_reconciliation import _receive
+
+    tenant, customer, product = env
+    SalesSettings.objects.update_or_create(
+        tenant=tenant,
+        defaults={
+            "loss_invoice_policy": SalesSettings.POLICY_BLOCK,
+            "cogs_cost_method": "last_purchase",
+        },
+    )
+    _receive(product, "5", "120", 3003, date=str(localdate()))
+    product.avg_cost = Decimal("50")
+    product.save(update_fields=["avg_cost"])
+
+    inv = SalesInvoice(
+        tenant=tenant, invoice_number="LP-NODATE", customer=customer,
+        currency=tenant._test_currency, invoice_date=None,
+        invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=False,
+    )
+    line = SalesInvoiceLine(
+        tenant=tenant, invoice=inv, product=product,
+        quantity=Decimal("1"), unit_price=Decimal("100"),
+        line_total_excl_tax=Decimal("100"),
+    )
+    from sales.services.calc import guard_loss_invoice
+    with pytest.raises(ValidationError, match="تحتوي بنداً يُباع بخسارة"):
+        guard_loss_invoice(inv, [line], {product.id: product}, stage=SalesSettings.STAGE_SAVE)

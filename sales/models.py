@@ -296,7 +296,7 @@ class SalesSettings(models.Model):
         db_column="WarnOnDuplicateItem",
         help_text="عند تكرار المادة في الفاتورة: إظهار رسالة تنبيه وتأكيد",
     )
-    # فاتورة بيع بخسارة (الإيراد الصافي < التكلفة بمتوسط التكلفة) على مستوى السطر.
+    # فاتورة بيع بخسارة (صافي إيراد السطر < التكلفة المتوقَّعة لطريقة تكلفة المبيعات: المعياري / آخر شراء، مع السقوط لمتوسط التكلفة).
     loss_invoice_policy = models.CharField(
         max_length=12,
         choices=POLICY_CHOICES,

@@ -38,7 +38,7 @@ export const InvoiceProfitsPage: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
-  const fmt = (n: string | number | undefined) => formatMoney(n);
+  const fmt = (n: string | number | null | undefined) => formatMoney(n);
 
   // فلترة العميل/الرقم محلياً (بحث نصّي) فوق نتيجة المدى الزمني من الخادم.
   const rows = (data?.rows || []).filter((r) => {
@@ -155,6 +155,18 @@ export const InvoiceProfitsPage: React.FC = () => {
         emptyHint="لا فواتير مرحّلة في المدى المحدد"
         getRowKey={(r) => r.invoice}
       />
+      {!search && data?.totals?.cost_variance != null && Number(data.totals.cost_variance) !== 0 && (
+        <div className="ktra-totals mt-2 w-60 ms-auto">
+          <div className="ktra-total-row">
+            <span>فروقات تكلفة المبيعات</span>
+            <span className="ktra-total-value tabular-nums" dir="ltr">{fmt(data.totals.cost_variance)}</span>
+          </div>
+          <div className="ktra-total-row ktra-total-row--grand">
+            <span>مجمل الربح بالتكلفة الفعلية</span>
+            <span className="ktra-total-value tabular-nums" dir="ltr">{fmt(data.totals.gross_profit)}</span>
+          </div>
+        </div>
+      )}
     </>
   );
 

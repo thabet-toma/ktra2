@@ -247,3 +247,125 @@ def test_journal_users_endpoint_lists_only_this_tenant_creators(env):
     res = client.get("/api/accounting/journals/users/", **h)
     assert res.status_code == 200, res.content
     assert res.json() == [{"id": env["owner"].id, "name": "سامي المحاسب"}]
+
+
+# ── T6: account_period_net ──────────────────────────────────────────────
+
+def test_account_period_net_filters_posted_dates_tenant_and_branch(env):
+    """T6: يجمع الأسطر المرحّلة للحساب والشركة ضمن التواريخ، ويعزل غير المرحّل والشركة الأخرى والفرع."""
+    import datetime
+    from accounting.services import account_period_net
+    from tenants.models import Branch
+
+    tenant = env["tenant"]
+    cash = env["cash"]
+    rev = env["rev"]
+    exp = env["exp"]
+    main_branch = Branch.objects.create(tenant=tenant, name="الرئيسي", code="MAIN-NET", is_main=True)
+    sub_branch = Branch.objects.create(tenant=tenant, name="الفرع", code="SUB-NET", is_main=False)
+
+    # 1) قيد مرحّل داخل الفترة (مدين 150 على exp، بلا فرع)
+    post_journal(
+        tenant_id=tenant.TenantID,
+        transaction_date=datetime.date(2026, 3, 10),
+        reference_type="MANUAL",
+        reference_id=9001,
+        description="قيد داخل الفترة",
+        lines_data=[
+            {"account": exp.id, "debit": Decimal("150.00"), "credit": Decimal("0.00")},
+            {"account": cash.id, "debit": Decimal("0.00"), "credit": Decimal("150.00")},
+        ],
+    )
+    # 2) قيد مرحّل داخل الفترة على الفرع غير الرئيسي (دائن 40 على exp)
+    post_journal(
+        tenant_id=tenant.TenantID,
+        transaction_date=datetime.date(2026, 3, 15),
+        reference_type="MANUAL",
+        reference_id=9002,
+        description="قيد فرع",
+        branch_id=sub_branch.id,
+        lines_data=[
+            {"account": cash.id, "debit": Decimal("40.00"), "credit": Decimal("0.00")},
+            {"account": exp.id, "debit": Decimal("0.00"), "credit": Decimal("40.00")},
+        ],
+    )
+    # 3) قيد خارج الفترة (نيسان، بعد date_to) — يُستبعد مع date_to=2026-03-31
+    post_journal(
+        tenant_id=tenant.TenantID,
+        transaction_date=datetime.date(2026, 4, 2),
+        reference_type="MANUAL",
+        reference_id=9003,
+        description="قيد خارج الفترة",
+        lines_data=[
+            {"account": exp.id, "debit": Decimal("500.00"), "credit": Decimal("0.00")},
+            {"account": cash.id, "debit": Decimal("0.00"), "credit": Decimal("500.00")},
+        ],
+    )
+    # 3b) قيد قبل date_from (شباط) — يُستبعد مع date_from=2026-03-01
+    post_journal(
+        tenant_id=tenant.TenantID,
+        transaction_date=datetime.date(2026, 2, 20),
+        reference_type="MANUAL",
+        reference_id=9006,
+        description="قيد قبل بداية الفترة",
+        lines_data=[
+            {"account": exp.id, "debit": Decimal("250.00"), "credit": Decimal("0.00")},
+            {"account": cash.id, "debit": Decimal("0.00"), "credit": Decimal("250.00")},
+        ],
+    )
+    # 4) قيد غير مرحّل (عبر _journal الذي يُنشئ مسودةً غير مرحّلة) — يُستبعد دائماً
+    draft_jh = _journal(
+        tenant,
+        [(exp, "300.00", "0.00"), (cash, "0.00", "300.00")],
+    )
+    assert not draft_jh.is_posted
+
+    # 5) شركة أخرى — سطرها يُستبعد
+    stranger = User.objects.create_user(username="net-stranger", password="x")
+    other_tenant = create_company("شركة ثانية", stranger)
+    create_fiscal_year(other_tenant, 2026)
+    other_exp = Account.objects.create(
+        tenant=other_tenant, code="5000-O", name="مصروف", account_type="Expense", is_active=True)
+    other_cash = Account.objects.create(
+        tenant=other_tenant, code="1000-O", name="صندوق", account_type="Asset", is_active=True)
+    post_journal(
+        tenant_id=other_tenant.TenantID,
+        transaction_date=datetime.date(2026, 3, 12),
+        reference_type="MANUAL",
+        reference_id=9005,
+        description="قيد شركة أخرى",
+        lines_data=[
+            {"account": other_exp.id, "debit": Decimal("999.00"), "credit": Decimal("0.00")},
+            {"account": other_cash.id, "debit": Decimal("0.00"), "credit": Decimal("999.00")},
+        ],
+    )
+
+    d_from = datetime.date(2026, 3, 1)
+    d_to = datetime.date(2026, 3, 31)
+    # كل الشركة في آذار: +150 - 40 = 110.00
+    assert account_period_net(
+        tenant_id=tenant.TenantID, account_id=exp.id, date_from=d_from, date_to=d_to,
+    ) == Decimal("110.00")
+    # الفرع الرئيسي يعادل None (لا يفلتر بالفرع)
+    assert account_period_net(
+        tenant_id=tenant.TenantID, account_id=exp.id, date_from=d_from, date_to=d_to,
+        branch=main_branch,
+    ) == Decimal("110.00")
+    # الفرع غير الرئيسي يفلتر بـ journal__branch: -40.00
+    assert account_period_net(
+        tenant_id=tenant.TenantID, account_id=exp.id, date_from=d_from, date_to=d_to,
+        branch=sub_branch,
+    ) == Decimal("-40.00")
+    # توسيع date_from ليشمل شباط يضمّ القيد المبكّر (+250) ⇒ 360.00
+    assert account_period_net(
+        tenant_id=tenant.TenantID, account_id=exp.id,
+        date_from=datetime.date(2026, 2, 1), date_to=d_to,
+    ) == Decimal("360.00")
+    # عزل الشركة: طلب شركة أخرى على حساب هذه الشركة يعيد Decimal("0.00")
+    assert account_period_net(
+        tenant_id=other_tenant.TenantID, account_id=exp.id, date_from=d_from, date_to=d_to,
+    ) == Decimal("0.00")
+    # حساب بلا حركات مطابقة يعيد Decimal("0.00")
+    assert account_period_net(
+        tenant_id=tenant.TenantID, account_id=rev.id, date_from=d_from, date_to=d_to,
+    ) == Decimal("0.00")

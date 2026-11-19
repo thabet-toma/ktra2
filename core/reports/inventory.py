@@ -829,14 +829,19 @@ def _sale_movement_shares(tenant_id: int, qs, extra_fields=()) -> list[dict]:
 
     حركةُ بيعٍ بلا سطر مقابل (منتجٌ خرج ولا بند له) نصيبُها صفر و**ربحُها صفر لا
     خسارة**: تكلفتها معلومة وإيرادها مجهول، وإعلانُها خسارةً اختراعُ رقم.
+
+    الربح يستخدم أساس تكلفة البيع الموحَّد (`inventory/cogs_method.py`
+    (`effective_cogs_expression`)) في الاستعلام نفسه — على صورة `sales_cogs_map`
+    في `sales/services/pricing.py`.
     """
+    from inventory.cogs_method import effective_cogs_expression
     from sales.services import (
         SALES_STOCK_REFERENCE_TYPES,
         sales_cogs_map,
         sales_revenue_map,
     )
 
-    fields = ["id", "reference_id", "product_id", "quantity", "total_cost"]
+    fields = ["id", "reference_id", "product_id", "quantity", "effective_cogs"]
     for name in extra_fields:
         if name not in fields:
             fields.append(name)
@@ -844,7 +849,9 @@ def _sale_movement_shares(tenant_id: int, qs, extra_fields=()) -> list[dict]:
         qs.filter(
             reference_type__in=SALES_STOCK_REFERENCE_TYPES,
             movement_type__in=_STOCK_OUTBOUND,
-        ).values(*fields)
+        )
+        .annotate(effective_cogs=effective_cogs_expression())
+        .values(*fields)
     )
     if not rows:
         return []
@@ -862,7 +869,7 @@ def _sale_movement_shares(tenant_id: int, qs, extra_fields=()) -> list[dict]:
             continue
         share = (line["net"] * Decimal(str(r["quantity"] or 0)) / total_qty).quantize(DEC)
         r["revenue"] = share
-        r["profit"] = share - Decimal(str(r["total_cost"] or 0))
+        r["profit"] = share - Decimal(str(r["effective_cogs"] or 0))
     return rows
 
 
@@ -1059,7 +1066,8 @@ register(ReportSpec(
         "فالتحويل المستودعي والجرد (بلا طرف) يغيبان عنهما ويظهران في بقية "
         "المحاور. والإيراد والربح مُسنَدان إلى حركة البيع نفسها بنصيبها من صافي "
         "سطر فاتورتها، فلا يظهران على محور المورد — إسنادُ ربحِ بيعةٍ إلى مورّد "
-        "بضاعتها يلزمه تتبّع طبقات التكلفة."
+        "بضاعتها يلزمه تتبّع طبقات التكلفة. والربحُ محسوبٌ بالتكلفة "
+        "الملتقَطة لطريقة البيع، بينما تبقى «تكلفة الصادر» قيمةَ المخزون الفعليّة."
     ),
     filters=DATE_FILTERS + (
         ReportFilter(

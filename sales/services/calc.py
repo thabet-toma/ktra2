@@ -10,6 +10,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import F, Q, Sum
+from django.utils.timezone import localdate
 
 from accounting.models import Account, ChequeMovement, JournalLine
 from accounting.services import (
@@ -21,7 +22,8 @@ from accounting.services import (
     validate_fiscal_period,
     validate_journal_entry,
 )
-from inventory.models import Product, StockMovement
+from inventory.cogs_method import FIXED_SNAPSHOT_METHODS, method_unit_cost
+from inventory.models import COGS_METHOD_FIFO, Product, StockMovement
 from inventory.serials import (
     consume_sales_serials,
     release_sales_serials,
@@ -536,21 +538,33 @@ def _loss_lines(
     invoice: SalesInvoice,
     lines: list[SalesInvoiceLine],
     products_by_id: dict[int, Product],
+    *,
+    method: str = COGS_METHOD_FIFO,
+    as_of=None,
 ) -> list[tuple]:
-    """W1: الأسطر المُباعة بخسارة — صافي إيراد السطر أقل من تكلفته.
+    """W1: الأسطر المُباعة بخسارة — صافي إيراد السطر أقل من تكلفته المتوقَّعة.
 
     «صافي إيراد السطر» = `line.line_total_excl_tax` (بعد خصم السطر + توزيع خصم الفاتورة
     والنسبة، وتعديل السعر شامل الضريبة) — نفس أساس `invoice_profits` وقيد COGS. التكلفة =
-    الكمية × متوسط التكلفة (WAC، مصدر حقيقة واحد). يفترض استدعاء
-    `recalculate_invoice_amounts` مسبقاً (يملأ `line_total_excl_tax`). يعيد
-    قائمة (line, product, revenue, cost) لكل سطر خاسر.
+    الكمية × التكلفة المتوقَّعة للطريقة (`method_unit_cost` لطرق `standard`/
+    `last_purchase` بتاريخ `as_of`، أو `avg_cost` عند غياب سعر الطريقة أو لبقية
+    الطرق). يفترض استدعاء `recalculate_invoice_amounts` مسبقاً (يملأ
+    `line_total_excl_tax`). يعيد قائمة (line, product, revenue, cost) لكل سطر خاسر.
     """
     offenders: list[tuple] = []
+    effective_as_of = as_of if as_of is not None else localdate()
     for line in lines:
         p = products_by_id.get(line.product_id)
         if p is None or getattr(p, "is_service", False):
             continue
-        cost = (Decimal(str(line.quantity)) * Decimal(str(p.avg_cost or 0))).quantize(DEC)
+        unit_cost = (
+            method_unit_cost(product=p, method=method, as_of=effective_as_of)
+            if method in FIXED_SNAPSHOT_METHODS
+            else None
+        )
+        if unit_cost is None:
+            unit_cost = p.avg_cost
+        cost = (Decimal(str(line.quantity)) * Decimal(str(unit_cost or 0))).quantize(DEC)
         revenue = Decimal(str(line.line_total_excl_tax or 0)).quantize(DEC)
         if (revenue - cost) < 0:
             offenders.append((line, p, revenue, cost))
@@ -564,8 +578,10 @@ def guard_loss_invoice(
     *,
     stage: str,
 ) -> None:
-    """W1: يرفض فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع أقل من متوسط
-    التكلفة) بحسب `SalesSettings.loss_invoice_policy` — حتى لو كان إجمالي الفاتورة
+    """W1: يرفض فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع أقل من
+    التكلفة المتوقَّعة لطريقة تكلفة المبيعات — السعر الثابت أو آخر شراء لـ
+    `standard`/`last_purchase` مع السقوط لمتوسط التكلفة، أو متوسط التكلفة لبقية
+    الطرق) بحسب `SalesSettings.loss_invoice_policy` — حتى لو كان إجمالي الفاتورة
     رابحاً. `stage` = `save` (الحفظ) أو `post` (الترحيل): `allow` لا يمنع شيئاً،
     `save_only` يمنع الترحيل وحده، `block` يمنعهما (القاعدة في
     `SalesSettings.policy_blocks`). المراجيع مُعفاة. يسمّي الأسطر المخالفة بالعربية
@@ -578,7 +594,11 @@ def guard_loss_invoice(
     policy = ss.loss_invoice_policy if ss else SalesSettings.POLICY_ALLOW
     if not SalesSettings.policy_blocks(policy, stage):
         return
-    offenders = _loss_lines(invoice, lines, products_by_id)
+    method = ss.cogs_cost_method if ss else COGS_METHOD_FIFO
+    offenders = _loss_lines(
+        invoice, lines, products_by_id,
+        method=method, as_of=invoice.invoice_date,
+    )
     if not offenders:
         return
     detail = "؛ ".join(

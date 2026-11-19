@@ -1,6 +1,7 @@
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.core.exceptions import ValidationError
+from django.db.models.functions import Coalesce
 
 from .models import (
     COGS_METHOD_FIFO, COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD, StockLayer,
@@ -31,6 +32,11 @@ def cost_variance_account_id(tenant_id):
 
 def is_sale_issue(movement_type, reference_type):
     return movement_type == 'OUT' and reference_type in SALE_ISSUE_REFERENCE_TYPES
+
+
+def effective_cogs_expression():
+    """أساس تكلفة البيع — تكلفة الطريقة الملتقَطة مع السقوط إلى كلفة المخزون الفعلية للحركات القديمة."""
+    return Coalesce("cogs_cost", "total_cost")
 
 
 def sync_fifo_snapshot(movement):
