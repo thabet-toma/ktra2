@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { humanizeThrown } from "../../utils/drfError";
 import { useConfirm } from "../../contexts/ConfirmContext";
-import { Boxes, Info, Landmark, Loader2, MapPin, Network, Percent, Save, Send, SlidersHorizontal, Truck, UserRound, Wallet } from "lucide-react";
+import { Boxes, Info, Landmark, Loader2, MapPin, Network, Percent, Save, Send, SlidersHorizontal, Tag, Truck, UserRound, Wallet } from "lucide-react";
 import {
   getSalesSettings,
   updateSalesSettings,
@@ -30,6 +30,11 @@ import {
   SERIAL_ENTRY_MODE_OPTIONS,
   type SerialEntryMode,
 } from "../../types/inventory";
+import {
+  PRODUCT_PRICE_COLUMN_OPTIONS,
+  normalizeProductPriceColumn,
+  type ProductPriceColumn,
+} from "../../utils/productPriceColumn";
 
 // ثلاث حالات للسياستين (الرصيد السالب / البيع بخسارة) — تطابق `SalesSettings.POLICY_CHOICES`.
 const POLICY_OPTIONS = (Object.keys(STOCK_LOSS_POLICY_LABELS) as StockLossPolicy[]).map(
@@ -809,6 +814,38 @@ export const SalesSettingsPage: React.FC = () => {
                   setField("default_shipping_destination", e.target.value)
                 }
               />
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    {
+      id: 'product-price-column', title: 'عمود السعر في جدول المنتجات', icon: Tag,
+      description: 'اختيار الرقم الأساسي المعروض في عمود السعر بجدول المنتجات (بقية الأرقام تبقى تحت «تفاصيل السعر»).',
+      keywords: [
+        'عمود السعر في جدول المنتجات',
+        'آخر سعر شراء',
+        'أقلّ شراء (آخر ٥)',
+        'التكلفة حسب الطريقة المختارة',
+        'متوسط تكلفة المخزون',
+        'السعر الثابت',
+      ],
+      content: (
+          <Section
+            title="عمود السعر في جدول المنتجات"
+            description="اختيار الرقم الأساسي المعروض في عمود السعر بجدول المنتجات (بقية الأرقام تبقى تحت «تفاصيل السعر»)."
+          >
+            <FieldLabel label="الرقم الأساسي في عمود السعر">
+              <select
+                className={input}
+                value={normalizeProductPriceColumn(settings.product_price_column)}
+                onChange={(e) =>
+                  setField("product_price_column", e.target.value as ProductPriceColumn)
+                }
+              >
+                {PRODUCT_PRICE_COLUMN_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
             </FieldLabel>
           </Section>
       ),

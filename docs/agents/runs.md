@@ -226,3 +226,13 @@
 | 2026-11-19 | تنفيذ LINT-INV-SALES (محاولة 1) | Hydrogen agy، high | 6ث | فشل backend: empty conversation id، بلا تعديل |
 | 2026-11-19 | تنفيذ LINT-INV-SALES (محاولة 2) | Hydrogen agy، high | — | نظيف؛ 8 passed، 1288 passed، 3 kept |
 | 2026-11-19 | بوّابة معزولة LINT | المنسّق | 4:29د | PaperAmounts المعروف + freshness ← sync_docs |
+| 2026-11-19 | تنفيذ M3 (m3-1) | Hydrogen (gemini-4-hydrogen-high) agy، high | — | 1296 passed inv+sales؛ freshness 1 فشل (ملفات `.agents` غير متتبَّعة؟)؛ 3 kept؛ 1440 frontend؛ Playwright 5 passed |
+| 2026-11-19 | مراجعة Standards M3 | Opus subagent | 11:23د | 11 ملاحظة؛ قُبل 9 (2 جزئياً)، رُفض 2 |
+| 2026-11-19 | مراجعة Spec M3 | Opus subagent | 8:20د | 6 ملاحظات؛ قُبل 5، رُفض 1 |
+| 2026-11-19 | بوّابة معزولة M3 (قبل التصليح) | المنسّق | 10:30د | 1 failed معروف، 8105 passed |
+| 2026-11-19 | M3 تصليح 1 | Hydrogen agy، high | — | البنود 1–7؛ mutation 4a أحمر ثم أخضر |
+| 2026-11-19 | M3 مراجعة نهائية Spec | Opus subagent | 3:45د | 3 وثائق قديمة، قُبلت |
+| 2026-11-19 | M3 مراجعة نهائية Standards | Opus subagent | 5:35د | F1/F2 قُبلا، F3 رُفض |
+| 2026-11-19 | M3 تصليح 2 | Hydrogen agy، high | — | 1–5؛ أحمر عند tenant=None ثم أخضر |
+| 2026-11-20 | M3 بوّابات | المنسّق | — | معزولة 8107 passed/1 معروف؛ frontend 1441؛ e2e 5 passed |
+| 2026-11-20 | M3 فحص مرئي | Hydrogen agy، high | — | 16 لقطة، راجعتُها بعيني: سليمة |

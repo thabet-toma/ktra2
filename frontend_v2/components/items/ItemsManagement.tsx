@@ -35,6 +35,15 @@ import {
 } from "../../utils/itemSimpleFields";
 import { humanizeThrown } from "../../utils/drfError";
 import { groupProductsByFamily, buildFamilyRow } from "../../utils/familyGrouping";
+import {
+  normalizeProductPriceColumn,
+  productPriceColumnHint,
+  productPriceColumnLabel,
+  productPriceDetails,
+  productPriceValue,
+  type ProductPriceColumn,
+} from "../../utils/productPriceColumn";
+import { getSalesSettings } from "../../services/salesApi";
 import { eventBus } from "../../utils/eventBus";
 import type { MergeCandidate } from "../../utils/productMerge";
 import type { MergeProductsResult } from "../../services/inventoryApi";
@@ -279,6 +288,20 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const { can } = usePermissions();
   const canManageCatalog = can("inventory.item.manage");
   const [addBrandRequest, setAddBrandRequest] = useState<AddBrandRequest | null>(null);
+  // M3-COGS: عمود السعر الأساسي في جدول المنتجات وتقرير الطباعة (السقوط إلى last_purchase بلا تنبيه).
+  const [priceColumn, setPriceColumn] = useState<ProductPriceColumn>("last_purchase");
+
+  useEffect(() => {
+    let cancelled = false;
+    getSalesSettings()
+      .then((ss) => {
+        if (!cancelled) setPriceColumn(normalizeProductPriceColumn(ss?.product_price_column));
+      })
+      .catch(() => {
+        if (!cancelled) setPriceColumn("last_purchase");
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   const orderingParam = sortKey
     ? `${sortDir === "desc" ? "-" : ""}${ORDER_FIELD[sortKey] ?? sortKey}`
@@ -583,14 +606,14 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const printableRows = groupProductsByFamily(all).map(
         (g) => (g.familyId == null ? g.members[0] : buildFamilyRow(g.members)),
       );
+      const priceColHeader = esc(productPriceColumnLabel(priceColumn));
       const rowsHtml = printableRows.map((p) => {
         const name = esc(labelWithStatus(p.name_ar || p.name_en || p.sku || "", p.is_active));
         const qty = Number(p.quantity_on_hand);
-        // ITEM-PURCHASE-DISPLAY: نفس رقم الشاشة — آخر سعر شراء في فاتورة شراء
-        // **مرحَّلة** (لا أقلّ الشراء ولا avg_cost) كي تتطابق الورقة مع الجدول.
-        // فراغه (بلا شراء مرحَّل) يُطبع "—" لا صفراً ولا متوسط تكلفة.
-        const lastPrice = p.last_purchase_price != null
-          ? formatMoney(p.last_purchase_price) : "—";
+        // M3-COGS: يطبع الرقم المختار في إعدادات الشركة (نفس عمود الجدول)،
+        // ويبقى "—" عند الفراغ لا صفراً ولا سقوطاً لرقمٍ آخر.
+        const rawPrimary = productPriceValue(p, priceColumn);
+        const primaryPrice = rawPrimary != null ? formatMoney(rawPrimary) : "—";
         // صفّ المنتج المجمّع يطبع سعر **براندٍ مرجعيٍّ واحد** (بنية التجميع كما
         // هي) — فالوسم يسمّيه صراحةً بدل أن يدّعي سعراً يمثّل المنتج كلّه.
         const anchorBrand = (p.family_member_ids?.length ?? 0) > 1
@@ -602,7 +625,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             <td>${name}</td>
             <td>${esc(p.category_name || "—")}</td>
             <td class="num ${cls}" style="direction: ltr">${qty}</td>
-            <td class="num" style="direction: ltr">${lastPrice}${
+            <td class="num" style="direction: ltr">${primaryPrice}${
               anchorBrand ? `<div class="hint">براند مرجعي: ${esc(anchorBrand)}</div>` : ""}</td>
             <td class="num" style="direction: ltr">${p.min_stock_level ?? "—"}</td>
             <td class="${cls}">${STATUS_LABEL[p.stock_status]}</td>
@@ -635,7 +658,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               <thead>
                 <tr>
                   <th>رقم المنتج</th><th>اسم المنتج</th><th>التصنيف</th>
-                  <th>الكمية</th><th>آخر سعر شراء</th><th>الحد الأدنى</th><th>الحالة</th>
+                  <th>الكمية</th><th>${priceColHeader}</th><th>الحد الأدنى</th><th>الحالة</th>
                 </tr>
               </thead>
               <tbody>${rowsHtml}</tbody>
@@ -653,7 +676,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     } finally {
       setExporting(false);
     }
-  }, [activeFilter]);
+  }, [activeFilter, priceColumn]);
 
   const allColumns: DenseColumn<SqlProduct>[] = [
     // W8: الأعمدة القيادية بالترتيب المطلوب — الكمية المشتراة (الوارد التراكمي)،
@@ -763,28 +786,28 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           {p.sku}
         </b>
     ) },
-    // ITEM-PURCHASE-DISPLAY: «آخر سعر شراء» هو الرقم الأساسي في الخليّة — أحدث
-    // فاتورة شراء **مرحَّلة**، لا أقلّ الشراء ولا avg_cost (رقمُ تفاوضٍ/شراءٍ لا
-    // تكلفة). «أقلّ شراء (آخر ٥)» يبقى مستقلاً خلف `<details>` مغلقةٍ في الخليّة
-    // نفسها — لا عموداً ثانياً يزاحم الرقم الأساسي. غير قابل للفرز خادمياً
-    // (لا عمود مخزَّن).
-    { key: "last_purchase_price", header: "آخر سعر شراء", width: "150px", align: "center", numeric: true,
+    // M3-COGS: الرقم الأساسي في الخليّة يتبع إعداد الشركة (`product_price_column`)،
+    // وتبقى الأرقام الأربعة الأخرى داخل `<details>` «تفاصيل السعر» بالترتيب نفسه.
+    // يُحفَظ المفتاح `last_purchase_price` معرّفاً ثابتاً للعمود بينما يتبع العنوان `product_price_column`.
+    { key: "last_purchase_price", header: productPriceColumnLabel(priceColumn), width: "150px", align: "center", numeric: true,
       render: (p) => {
         const groupedCount = p.family_member_ids?.length ?? 0;
         const grouped = groupedCount > 1;
         const anchorBrand = (p.brand || "").trim();
-        const last = p.last_purchase_price != null ? fmt(p.last_purchase_price) : "—";
-        const lowest = p.indicative_purchase_price != null ? fmt(p.indicative_purchase_price) : "—";
+        const primaryLabel = productPriceColumnLabel(priceColumn);
+        const rawPrimary = productPriceValue(p, priceColumn);
+        const primary = rawPrimary != null ? fmt(rawPrimary) : "—";
+        const details = productPriceDetails(p, priceColumn);
         return (
           <div className="flex w-full flex-col items-center gap-0.5" data-testid="purchase-price-cell">
             <span
               className="font-semibold"
-              data-testid="purchase-last-price"
+              data-testid="product-price-primary"
               title={grouped
-                ? `آخر سعر شراء لبراند «${anchorBrand || "مرجعي"}» وحده — الصفّ مجمّع من ${formatNumber(groupedCount)} براندات`
-                : "آخر سعر شراء في فاتورة شراء مرحَّلة — لا متوسط التكلفة"}
+                ? `${primaryLabel} لبراند «${anchorBrand || "مرجعي"}» وحده — الصفّ مجمّع من ${formatNumber(groupedCount)} براندات`
+                : productPriceColumnHint(priceColumn)}
             >
-              {last}
+              {primary}
             </span>
             {/* `w-full` على الحاوية والتفاصيل معاً: عمودٌ بعرض 150px لا يسمح
                 لسطر «تفاصيل السعر» بأن يفرض عرضه shrink-to-fit فيزحم الأعمدة. */}
@@ -797,12 +820,15 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
                 تفاصيل السعر
               </summary>
               <div className="mt-0.5 flex w-full flex-col gap-0.5 text-[10px] text-[var(--ktra-ink-soft)]">
-                <span
-                  data-testid="purchase-lowest-price"
-                  title={p.indicative_purchase_price_source || undefined}
-                >
-                  أقلّ شراء (آخر ٥): {lowest}
-                </span>
+                {details.map((d) => (
+                  <span
+                    key={d.key}
+                    data-testid={`product-price-detail-${d.key}`}
+                    title={d.key === "lowest_purchase" ? (p.indicative_purchase_price_source || undefined) : undefined}
+                  >
+                    {d.label}: {d.value != null ? fmt(d.value) : "—"}
+                  </span>
+                ))}
                 {/* الصفّ المجمّع (بنية `utils/familyGrouping` كما هي): الرقم
                     المرجعي لبراندٍ واحد — يُسمّى صراحةً فلا يُقرأ سعراً للمنتج كلّه. */}
                 {grouped && (

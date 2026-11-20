@@ -46,6 +46,19 @@ class SalesSettings(models.Model):
         (POLICY_SAVE_ONLY, "منع الترحيل حتى موافقة الزبون"),
     ]
 
+    PRODUCT_PRICE_LAST_PURCHASE = "last_purchase"
+    PRODUCT_PRICE_LOWEST_PURCHASE = "lowest_purchase"
+    PRODUCT_PRICE_METHOD_COST = "method_cost"
+    PRODUCT_PRICE_INVENTORY_AVG = "inventory_avg"
+    PRODUCT_PRICE_STANDARD = "standard"
+    PRODUCT_PRICE_COLUMN_CHOICES = [
+        (PRODUCT_PRICE_LAST_PURCHASE, "آخر سعر شراء"),
+        (PRODUCT_PRICE_LOWEST_PURCHASE, "أقلّ شراء (آخر ٥)"),
+        (PRODUCT_PRICE_METHOD_COST, "التكلفة حسب الطريقة المختارة"),
+        (PRODUCT_PRICE_INVENTORY_AVG, "متوسط تكلفة المخزون"),
+        (PRODUCT_PRICE_STANDARD, "السعر الثابت"),
+    ]
+
     @classmethod
     def policy_blocks(cls, policy: str, stage: str) -> bool:
         """هل تمنع `policy` العمليةَ في المرحلة `stage` (`save` أو `post`)؟
@@ -237,6 +250,14 @@ class SalesSettings(models.Model):
         default=COGS_METHOD_FIFO,
         db_column="CogsCostMethod",
         help_text="طريقة تكلفة المبيعات للشركة (تُقرأ لقطةً عند ترحيل فاتورة البيع)",
+    )
+    # M3-COGS: تفضيل عرضٍ لعمود السعر الأساسي في جدول المنتجات (بقيّة الخيارات تحت «تفاصيل السعر»).
+    product_price_column = models.CharField(
+        max_length=20,
+        choices=PRODUCT_PRICE_COLUMN_CHOICES,
+        default=PRODUCT_PRICE_LAST_PURCHASE,
+        db_column="ProductPriceColumn",
+        help_text="السعر الأساسي المعروض في عمود السعر بجدول المنتجات",
     )
 
     default_vat_rate = models.ForeignKey(

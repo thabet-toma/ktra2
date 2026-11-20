@@ -30,6 +30,20 @@ def cost_variance_account_id(tenant_id):
     return account_id
 
 
+def tenant_cogs_method(tenant_id) -> str:
+    """طريقة احتساب تكلفة المبيعات للشركة — السقوط إلى FIFO عند غياب صفّ الإعدادات."""
+    if not tenant_id:
+        return COGS_METHOD_FIFO
+    from sales.models import SalesSettings
+
+    method = (
+        SalesSettings.objects.filter(tenant_id=tenant_id)
+        .values_list('cogs_cost_method', flat=True)
+        .first()
+    )
+    return method or COGS_METHOD_FIFO
+
+
 def is_sale_issue(movement_type, reference_type):
     return movement_type == 'OUT' and reference_type in SALE_ISSUE_REFERENCE_TYPES
 
@@ -46,15 +60,43 @@ def sync_fifo_snapshot(movement):
     return False
 
 
+def last_purchase_unit_costs(*, tenant_id, product_ids, as_of) -> dict[int, Decimal]:
+    """تكلفة الوحدة من آخر طبقة استلام شراء غير مؤقتة حتى `as_of` لكل منتج — استعلامٌ واحد.
+
+    `product_ids=None` يقرأ كل منتجات الشركة؛ قائمةٌ فارغة ⇒ `{}` بلا استعلام.
+    """
+    if not tenant_id:
+        return {}
+    qs = StockLayer.objects.filter(
+        tenant_id=tenant_id,
+        is_provisional=False,
+        source_movement__reference_type__in=PURCHASE_RECEIPT_REFERENCE_TYPES,
+        layer_date__lte=as_of,
+    )
+    if product_ids is not None:
+        ids = [pid for pid in product_ids if pid is not None]
+        if not ids:
+            return {}
+        qs = qs.filter(product_id__in=ids)
+    rows = (
+        qs.order_by('product_id', '-layer_date', '-id')
+        .values_list('product_id', 'unit_cost')
+    )
+    result: dict[int, Decimal] = {}
+    for pid, unit_cost in rows:
+        result.setdefault(pid, unit_cost)
+    return result
+
+
 def method_unit_cost(*, product, method, as_of):
     if method == COGS_METHOD_STANDARD:
         return product.standard_cost
     if method == COGS_METHOD_LAST_PURCHASE:
-        return (StockLayer.objects.filter(
-            tenant_id=product.tenant_id, product=product, is_provisional=False,
-            source_movement__reference_type__in=PURCHASE_RECEIPT_REFERENCE_TYPES,
-            layer_date__lte=as_of,
-        ).order_by('-layer_date', '-id').values_list('unit_cost', flat=True).first())
+        return last_purchase_unit_costs(
+            tenant_id=product.tenant_id,
+            product_ids=[product.pk],
+            as_of=as_of,
+        ).get(product.pk)
     return None
 
 

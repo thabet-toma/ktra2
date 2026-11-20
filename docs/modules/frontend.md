@@ -111,10 +111,13 @@
 `styles/index.css` — القاعدة خارج طبقات Tailwind — فكان «الطيّ» يترك 240px
 بيضاء ولا يعيد للشاشة شيئاً. يحرس هذا كلَّه `e2e/items-tree-card-pane.spec.ts`.
 
-**سعر الشراء في جدول المنتجات ورأس الكرت (ITEM-PURCHASE-DISPLAY)**: خليّة
-«آخر سعر شراء» في `components/items/ItemsManagement.tsx` هي الرقم الأساسي —
-وهو نفس رقم تقرير الطباعة — و«أقلّ شراء (آخر ٥)» داخل `<details>` مغلقةٍ
-بعنوان «تفاصيل السعر» **في الخليّة نفسها**: لا عمودٌ ثانٍ، ولا مساس بـ
+**سعر الشراء في جدول المنتجات ورأس الكرت (ITEM-PURCHASE-DISPLAY / M3-COGS)**: عنوان
+عمود السعر ورقمه الأساسي في `components/items/ItemsManagement.tsx` — ومعهما عمود
+السعر في تقرير الطباعة — يتبعان إعداد `SalesSettings.product_price_column` عبر
+`frontend_v2/utils/productPriceColumn.ts` (`productPriceColumnLabel` و
+`productPriceColumnHint` و`productPriceValue` و`productPriceDetails`؛ الافتراضي
+«آخر سعر شراء»)، وتُعرض الخيارات الأربعة الأخرى داخل `<details>` مغلقةٍ بعنوان
+«تفاصيل السعر» **في الخليّة نفسها**: لا عمودٌ ثانٍ، ولا مساس بـ
 `kit/KitDenseTable.tsx`/`items/GroupedItemsTable.tsx` (المكوّنان المشتركان
 يبقيان بلا ميزةٍ عامّة). ورأس `components/items/ItemForm.tsx` يعرض خارج كل
 التبويبات القيمَ الثلاث قبل أي نقرة: «آخر سعر شراء» · «أقلّ شراء (آخر ٥)» ·
@@ -129,7 +132,7 @@
 يحرسه `e2e/items-purchase-prices.spec.ts` بأرقامٍ متمايزة (متوسط ٣٠ · أقلّ ٢٠ ·
 آخر ٤٠): التفاصيل مغلقةٌ افتراضياً ثم تُفتح، والرأس يعرض الثلاثة قبل تبديل
 تبويب، ومنتجٌ بلا شراءٍ مرحَّل يعرض «—» لا متوسط التكلفة، والصفّ المجمّع
-يحتفظ بسعر مرجعه.
+يحتفظ بسعر مرجعه، وعند ضبط الإعداد على `inventory_avg` يتغيّر عنوان العمود والرقم الأساسي.
 
 ## العقود مع الخادم
 

@@ -10,6 +10,7 @@ import {
 } from "./restApi";
 import type { PagedList } from "./restApi";
 import type { SerialEntryMode } from "../types/inventory";
+import type { ProductPriceColumn } from "../utils/productPriceColumn";
 import type { NoteTarget } from "../utils/voucherAllocation";
 import type { CustomerApprovalStatus } from "../utils/customerApproval";
 
@@ -1027,6 +1028,8 @@ export type SalesSettings = {
   block_reserved_stock_sale: boolean;
   /** T-SERIAL: نمط إدخال الرقم التسلسلي في بنود فاتورة البيع (الافتراضي «معطّل»). */
   serial_entry_mode: SerialEntryMode;
+  /** M3-COGS: الرقم الأساسي المعروض في عمود السعر بجدول المنتجات. */
+  product_price_column: ProductPriceColumn;
   default_shipping_origin: string;
   default_shipping_destination: string;
   /** تسمية مستند التسليم المرتبط بفاتورة (يحرّرها المستخدم). */

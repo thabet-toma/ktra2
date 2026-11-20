@@ -10,7 +10,8 @@ from unittest.mock import patch
 from django.contrib.auth.models import User
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
-from rest_framework.test import APITestCase
+from django.utils import timezone
+from rest_framework.test import APIRequestFactory, APITestCase
 
 from core.models import ActivityLog
 from core.pricing import last_purchase_prices_base_currency
@@ -1062,3 +1063,338 @@ class ProductApiTest(APITestCase):
             format="json", HTTP_X_TENANT_ID=self._tenant_id,
         )
         assert bad.status_code == 400, bad.content[:300]
+
+    # ── M3-COGS: inventory_avg_cost و method_cost في Product API + الدفعة الواحدة ──
+    def _make_purchase_layer(
+        self, tenant, product, *, qty, unit_cost, layer_date,
+        reference_type="PURCHASE_INVOICE", is_provisional=False,
+    ):
+        mv = StockMovement.objects.create(
+            tenant=tenant,
+            product=product,
+            movement_type="IN",
+            quantity=Decimal(str(qty)),
+            unit_cost=Decimal(str(unit_cost)),
+            total_cost=(Decimal(str(qty)) * Decimal(str(unit_cost))).quantize(Decimal("0.01")),
+            reference_type=reference_type,
+            movement_date=layer_date,
+        )
+        return StockLayer.objects.create(
+            tenant=tenant,
+            product=product,
+            layer_date=layer_date,
+            original_qty=Decimal(str(qty)),
+            remaining_qty=Decimal(str(qty)),
+            unit_cost=Decimal(str(unit_cost)),
+            source_movement=mv,
+            is_provisional=is_provisional,
+        )
+
+    def test_list_exposes_inventory_avg_cost_from_open_layers_not_product_avg_cost(self):
+        p_layers = Product.objects.create(
+            tenant=self.t_a, sku="IAVG-1", name_ar="له طبقات",
+            avg_cost=Decimal("99.0000"),
+        )
+        p_empty = Product.objects.create(
+            tenant=self.t_a, sku="IAVG-2", name_ar="بلا طبقات مفتوحة",
+            avg_cost=Decimal("55.0000"),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_layers, qty=8, unit_cost=10,
+            layer_date=datetime.date(2026, 6, 1),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_layers, qty=4, unit_cost=16,
+            layer_date=datetime.date(2026, 6, 2),
+        )
+        self._auth()
+
+        rows = {r["id"]: r for r in self._get().json()}
+        assert Decimal(rows[p_layers.id]["inventory_avg_cost"]) == Decimal("12.0000")
+        assert Decimal(rows[p_layers.id]["avg_cost"]) == Decimal("99.0000")
+        assert rows[p_empty.id]["inventory_avg_cost"] is None
+
+    def test_list_exposes_method_cost_per_tenant_cogs_method_with_fallback(self):
+        from sales.models import SalesSettings
+
+        today = timezone.localdate()
+        p_std = Product.objects.create(
+            tenant=self.t_a, sku="MC-STD", name_ar="معياري",
+            standard_cost=Decimal("7.0000"),
+        )
+        p_no_std = Product.objects.create(
+            tenant=self.t_a, sku="MC-NOSTD", name_ar="بلا معياري",
+            standard_cost=None,
+        )
+        self._make_purchase_layer(
+            self.t_a, p_std, qty=5, unit_cost=10, layer_date=today - datetime.timedelta(days=2),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_std, qty=5, unit_cost=20, layer_date=today - datetime.timedelta(days=1),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_no_std, qty=4, unit_cost=15, layer_date=today - datetime.timedelta(days=1),
+        )
+        self._auth()
+
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+
+        # 1) standard: uses standard_cost when set, falls back to inventory_avg_cost when None
+        ss.cogs_cost_method = "standard"
+        ss.save(update_fields=["cogs_cost_method"])
+        rows = {r["id"]: r for r in self._get().json()}
+        assert Decimal(rows[p_std.id]["method_cost"]) == Decimal("7.0000")
+        assert Decimal(rows[p_no_std.id]["method_cost"]) == Decimal("15.0000")
+
+        # 2) last_purchase: latest non-provisional purchase layer up to today
+        ss.cogs_cost_method = "last_purchase"
+        ss.save(update_fields=["cogs_cost_method"])
+        rows = {r["id"]: r for r in self._get().json()}
+        assert Decimal(rows[p_std.id]["method_cost"]) == Decimal("20.0000")
+
+        # 3) fifo: equals inventory_avg_cost
+        ss.cogs_cost_method = "fifo"
+        ss.save(update_fields=["cogs_cost_method"])
+        rows = {r["id"]: r for r in self._get().json()}
+        assert Decimal(rows[p_std.id]["method_cost"]) == Decimal("15.0000")
+        assert rows[p_std.id]["method_cost"] == rows[p_std.id]["inventory_avg_cost"]
+
+    def test_last_purchase_unit_costs_matches_method_unit_cost_and_ignores_provisional_and_future(self):
+        from inventory.cogs_method import last_purchase_unit_costs, method_unit_cost
+
+        as_of = datetime.date(2026, 6, 10)
+        p1 = Product.objects.create(tenant=self.t_a, sku="LPUC-1", name_ar="أول")
+        p2 = Product.objects.create(tenant=self.t_a, sku="LPUC-2", name_ar="ثان")
+        p3 = Product.objects.create(tenant=self.t_a, sku="LPUC-3", name_ar="بلا شراء")
+
+        self._make_purchase_layer(
+            self.t_a, p1, qty=3, unit_cost=11, layer_date=datetime.date(2026, 6, 1),
+        )
+        self._make_purchase_layer(
+            self.t_a, p1, qty=2, unit_cost=14, layer_date=datetime.date(2026, 6, 10),
+        )
+        # Provisional layer on same/later date must be ignored
+        self._make_purchase_layer(
+            self.t_a, p1, qty=1, unit_cost=99, layer_date=datetime.date(2026, 6, 10),
+            is_provisional=True,
+        )
+        # Future layer beyond as_of must be ignored
+        self._make_purchase_layer(
+            self.t_a, p1, qty=1, unit_cost=88, layer_date=datetime.date(2026, 6, 11),
+        )
+        # Non-purchase movement must be ignored
+        self._make_purchase_layer(
+            self.t_a, p2, qty=5, unit_cost=50, layer_date=datetime.date(2026, 6, 5),
+            reference_type="ADJUST_IN",
+        )
+        self._make_purchase_layer(
+            self.t_a, p2, qty=5, unit_cost=22, layer_date=datetime.date(2026, 6, 4),
+        )
+
+        with CaptureQueriesContext(connection) as captured:
+            batched = last_purchase_unit_costs(
+                tenant_id=self.t_a.TenantID,
+                product_ids=[p1.id, p2.id, p3.id],
+                as_of=as_of,
+            )
+
+        assert len(captured) == 1
+        for prod in (p1, p2, p3):
+            expected = method_unit_cost(product=prod, method="last_purchase", as_of=as_of)
+            assert batched.get(prod.id) == expected
+        assert batched[p1.id] == Decimal("14.0000")
+        assert batched[p2.id] == Decimal("22.0000")
+        assert p3.id not in batched
+
+    def test_m3_product_list_query_count_same_for_2_and_6_products(self):
+        from sales.models import SalesSettings
+
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss.cogs_cost_method = "last_purchase"
+        ss.save(update_fields=["cogs_cost_method"])
+
+        today = timezone.localdate()
+        for i in range(6):
+            p = Product.objects.create(
+                tenant=self.t_a, sku=f"M3Q-{i}", name_ar=f"دفعة م3 {i}",
+                standard_cost=Decimal("5.0000"),
+            )
+            self._make_purchase_layer(
+                self.t_a, p, qty=4, unit_cost=10 + i, layer_date=today,
+            )
+        self._auth()
+
+        with CaptureQueriesContext(connection) as two_q:
+            two = self._get("?page=1&page_size=2")
+        with CaptureQueriesContext(connection) as six_q:
+            six = self._get("?page=1&page_size=6")
+
+        assert len(two.json()["results"]) == 2
+        assert len(six.json()["results"]) == 6
+        assert "inventory_avg_cost" in six.json()["results"][0]
+        assert "method_cost" in six.json()["results"][0]
+        assert len(six_q) == len(two_q), [q["sql"] for q in six_q]
+
+    def test_m3_product_fields_are_tenant_isolated_and_null_without_request(self):
+        from inventory.serializers import ProductSerializer
+        from sales.models import SalesSettings
+
+        today = timezone.localdate()
+        p_a = Product.objects.create(
+            tenant=self.t_a, sku="ISO-A", name_ar="منتج أ", standard_cost=Decimal("9.0000"),
+        )
+        # Tenant A: 1 @ 10 + 1 @ 14 -> open-layer avg = 12, latest purchase = 14
+        self._make_purchase_layer(
+            self.t_a, p_a, qty=1, unit_cost=10,
+            layer_date=today - datetime.timedelta(days=2),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_a, qty=1, unit_cost=14,
+            layer_date=today - datetime.timedelta(days=1),
+        )
+        # Foreign tenant layer with a PURCHASE_INVOICE movement and LATER date than tenant A's purchase
+        self._make_purchase_layer(
+            self.t_b, p_a, qty=10, unit_cost=500,
+            layer_date=today, reference_type="PURCHASE_INVOICE",
+        )
+        ss_b, _ = SalesSettings.objects.get_or_create(tenant=self.t_b)
+        ss_b.cogs_cost_method = "standard"
+        ss_b.save(update_fields=["cogs_cost_method"])
+
+        ss_a, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss_a.cogs_cost_method = "last_purchase"
+        ss_a.save(update_fields=["cogs_cost_method"])
+
+        self._auth()
+        row = next(r for r in self._get().json() if r["id"] == p_a.id)
+        assert Decimal(row["inventory_avg_cost"]) == Decimal("12.0000")
+        assert Decimal(row["method_cost"]) == Decimal("14.0000")
+
+        # No request in context -> null for the new computed fields, no exception
+        no_ctx = ProductSerializer(p_a).data
+        assert no_ctx["inventory_avg_cost"] is None
+        assert no_ctx["method_cost"] is None
+
+    def test_derived_avg_costs_matches_derived_avg_cost_and_scopes_to_tenant(self):
+        from inventory.fifo import derived_avg_cost, derived_avg_costs
+
+        p_layers = Product.objects.create(tenant=self.t_a, sku="DAC-1", name_ar="طبقات")
+        p_frac = Product.objects.create(tenant=self.t_a, sku="DAC-2", name_ar="كسور")
+        p_zero = Product.objects.create(tenant=self.t_a, sku="DAC-3", name_ar="صفر")
+        p_other = Product.objects.create(tenant=self.t_b, sku="DAC-B", name_ar="شركة ب")
+
+        self._make_purchase_layer(
+            self.t_a, p_layers, qty=8, unit_cost=10, layer_date=datetime.date(2026, 6, 1),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_layers, qty=4, unit_cost=16, layer_date=datetime.date(2026, 6, 2),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_frac, qty="0.3333", unit_cost="1.0001", layer_date=datetime.date(2026, 6, 1),
+        )
+        self._make_purchase_layer(
+            self.t_a, p_frac, qty=2, unit_cost=3, layer_date=datetime.date(2026, 6, 2),
+        )
+        self._make_purchase_layer(
+            self.t_b, p_other, qty=5, unit_cost=50, layer_date=datetime.date(2026, 6, 2),
+        )
+
+        with CaptureQueriesContext(connection) as empty_q:
+            assert derived_avg_costs(tenant_id=self.t_a.TenantID, product_ids=[]) == {}
+        assert len(empty_q) == 0
+
+        with CaptureQueriesContext(connection) as scoped_q:
+            scoped = derived_avg_costs(
+                tenant_id=self.t_a.TenantID,
+                product_ids=[p_layers.id, p_frac.id, p_zero.id],
+            )
+        assert len(scoped_q) == 1
+        assert scoped[p_layers.id] == derived_avg_cost(
+            tenant_id=self.t_a.TenantID, product_id=p_layers.id,
+        )
+        assert scoped[p_frac.id] == derived_avg_cost(
+            tenant_id=self.t_a.TenantID, product_id=p_frac.id,
+        )
+        assert p_zero.id not in scoped
+        assert derived_avg_cost(tenant_id=self.t_a.TenantID, product_id=p_zero.id) == Decimal("0")
+
+        with CaptureQueriesContext(connection) as all_q:
+            all_tenant = derived_avg_costs(tenant_id=self.t_a.TenantID, product_ids=None)
+        assert len(all_q) == 1
+        assert set(all_tenant.keys()) == {p_layers.id, p_frac.id}
+        assert p_other.id not in all_tenant
+
+    def test_unscoped_product_serializer_caches_per_context_without_n_plus_1(self):
+        from inventory.serializers import ProductSerializer
+        from sales.models import SalesSettings
+
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss.cogs_cost_method = "last_purchase"
+        ss.save(update_fields=["cogs_cost_method"])
+
+        today = timezone.localdate()
+        created = []
+        for i in range(6):
+            p = Product.objects.create(
+                tenant=self.t_a, sku=f"UNSC-{i}", name_ar=f"بلا نطاق {i}",
+                standard_cost=Decimal("5.0000"),
+            )
+            self._make_purchase_layer(
+                self.t_a, p, qty=4, unit_cost=10 + i, layer_date=today,
+            )
+            created.append(p)
+
+        factory = APIRequestFactory()
+        qs_two = Product.objects.filter(
+            tenant=self.t_a, pk__in=[p.id for p in created[:2]],
+        ).prefetch_related("price_tiers").order_by("id")
+        qs_six = Product.objects.filter(
+            tenant=self.t_a, pk__in=[p.id for p in created],
+        ).prefetch_related("price_tiers").order_by("id")
+
+        req_two = factory.get(PRODUCTS_URL, HTTP_X_TENANT_ID=str(self.t_a.TenantID))
+        req_two.user = self.owner_a
+        req_six = factory.get(PRODUCTS_URL, HTTP_X_TENANT_ID=str(self.t_a.TenantID))
+        req_six.user = self.owner_a
+
+        with CaptureQueriesContext(connection) as two_q:
+            two_data = ProductSerializer(
+                qs_two, many=True,
+                context={
+                    "request": req_two,
+                    "product_attachments": {},
+                    "serial_requirement_map": {},
+                },
+            ).data
+        with CaptureQueriesContext(connection) as six_q:
+            six_data = ProductSerializer(
+                qs_six, many=True,
+                context={
+                    "request": req_six,
+                    "product_attachments": {},
+                    "serial_requirement_map": {},
+                },
+            ).data
+
+        assert len(two_data) == 2
+        assert len(six_data) == 6
+        assert len(six_q) == len(two_q), [q["sql"] for q in six_q]
+
+        req_scoped = factory.get(PRODUCTS_URL, HTTP_X_TENANT_ID=str(self.t_a.TenantID))
+        req_scoped.user = self.owner_a
+        scoped_data = ProductSerializer(
+            qs_six, many=True,
+            context={
+                "request": req_scoped,
+                "product_attachments": {},
+                "serial_requirement_map": {},
+                "last_purchase_price_product_ids": [p.id for p in created],
+            },
+        ).data
+        unscoped_by_id = {r["id"]: r for r in six_data}
+        scoped_by_id = {r["id"]: r for r in scoped_data}
+        assert unscoped_by_id[created[0].id]["inventory_avg_cost"] == "10.0000"
+        assert unscoped_by_id[created[0].id]["method_cost"] is not None
+        for p in created:
+            assert unscoped_by_id[p.id]["inventory_avg_cost"] == scoped_by_id[p.id]["inventory_avg_cost"]
+            assert unscoped_by_id[p.id]["method_cost"] == scoped_by_id[p.id]["method_cost"]

@@ -626,28 +626,41 @@ def open_layers_quantity(*, tenant_id: int, product_ids) -> dict:
     return {row["product_id"]: _d(row["qty"]).quantize(Q4) for row in rows}
 
 
+def derived_avg_costs(*, tenant_id: int, product_ids) -> dict[int, Decimal]:
+    """متوسط الكلفة المشتقّ من الطبقات المفتوحة (قيمتها ÷ كميّتها) لمنتجاتٍ
+    متعدّدة — **استعلامٌ واحد** (تجميع قيمةٍ وكميّةٍ معاً بلا تدويرٍ وسيط
+    للقيمة قبل القسمة، وبلا دخول `qty <= 0` في النتيجة).
+
+    `product_ids=None` يشمل كلّ منتجات الشركة؛ قائمةٌ فارغة ⇒ `{}` بلا استعلام.
+    """
+    qs = StockLayer.objects.filter(tenant_id=tenant_id, remaining_qty__gt=0)
+    if product_ids is not None:
+        ids = [pid for pid in product_ids if pid is not None]
+        if not ids:
+            return {}
+        qs = qs.filter(product_id__in=ids)
+    rows = qs.values("product_id").annotate(
+        qty=Sum("remaining_qty"),
+        value=Sum(
+            F("remaining_qty") * F("unit_cost"),
+            output_field=DecimalField(max_digits=18, decimal_places=4),
+        ),
+    )
+    result: dict[int, Decimal] = {}
+    for row in rows:
+        qty = _d(row["qty"])
+        if qty > 0:
+            result[row["product_id"]] = (_d(row["value"]) / qty).quantize(Q4)
+    return result
+
+
 def derived_avg_cost(*, tenant_id: int, product_id: int) -> Decimal:
     """متوسط الكلفة المشتقّ من الطبقات المفتوحة (قيمتها ÷ كميّتها). صفرٌ عند
     صفر كمية — بلا قسمة على صفر.
 
-    **استعلامٌ واحد** يجمع القيمة والكمية معاً لا نداءان لـ`open_layers_value`
-    و`open_layers_quantity`: تُنادى هذه الدالّة مرّةً في كلّ حركة مخزون
-    (`record_stock_movement`)، ففاتورةٌ بخمسين بنداً كانت تدفع خمسين استعلاماً
-    زائداً بلا مقابل.
+    **استعلامٌ واحد** عبر التفويض إلى `derived_avg_costs` الذي يجمع القيمة
+    والكميّة معاً (تُنادى مرّةً في كلّ حركة مخزون `record_stock_movement`).
     """
-    row = (
-        StockLayer.objects.filter(
-            tenant_id=tenant_id, product_id=product_id, remaining_qty__gt=0,
-        )
-        .aggregate(
-            qty=Sum("remaining_qty"),
-            value=Sum(
-                F("remaining_qty") * F("unit_cost"),
-                output_field=DecimalField(max_digits=18, decimal_places=4),
-            ),
-        )
+    return derived_avg_costs(tenant_id=tenant_id, product_ids=[product_id]).get(
+        product_id, Decimal("0"),
     )
-    qty = _d(row["qty"])
-    if qty == 0:
-        return Decimal("0")
-    return (_d(row["value"]) / qty).quantize(Q4)

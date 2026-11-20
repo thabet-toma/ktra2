@@ -1,9 +1,13 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 from django.db import transaction
 from django.utils import timezone
 from core.api_defaults import CountedQuantityField, TenantScopedPrimaryKeyRelatedField
 from core.user_roles import user_display_name
+from .fifo import Q4
 from .models import (
+    COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD,
     ProductCategory, ProductFamily, Product, ProductPriceTier,
     ProductStorageLocation, UnitOfMeasure, StockMovement, SupplierProduct,
     Warehouse, WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
@@ -254,6 +258,58 @@ def _indicative_purchase_price_map(context) -> dict:
     return context['_indicative_purchase_price_map']
 
 
+def _context_tenant_id(context):
+    request = context.get('request')
+    if request is None:
+        return None
+    from core.tenant_utils import get_tenant
+    tenant = get_tenant(request)
+    return tenant.TenantID if tenant else None
+
+
+def _inventory_avg_cost_map(context) -> dict:
+    """M3-COGS: متوسط تكلفة المخزون من الطبقات المفتوحة (`derived_avg_costs`)،
+    مخبَّأً في `context` الطلب على نطاق `last_purchase_price_product_ids`
+    (وعند غيابه لكلّ منتجات الشركة مرّةً واحدة لا لكلّ صفّ). ليس `Product.avg_cost`."""
+    if '_inventory_avg_cost_map' not in context:
+        tenant_id = _context_tenant_id(context)
+        if not tenant_id:
+            context['_inventory_avg_cost_map'] = {}
+        else:
+            from .fifo import derived_avg_costs
+            context['_inventory_avg_cost_map'] = derived_avg_costs(
+                tenant_id=tenant_id,
+                product_ids=context.get('last_purchase_price_product_ids'),
+            )
+    return context['_inventory_avg_cost_map']
+
+
+def _tenant_cogs_method_cached(context) -> str | None:
+    if '_tenant_cogs_method' not in context:
+        tenant_id = _context_tenant_id(context)
+        if not tenant_id:
+            context['_tenant_cogs_method'] = None
+        else:
+            from .cogs_method import tenant_cogs_method
+            context['_tenant_cogs_method'] = tenant_cogs_method(tenant_id)
+    return context['_tenant_cogs_method']
+
+
+def _last_purchase_unit_cost_map(context) -> dict:
+    if '_last_purchase_unit_cost_map' not in context:
+        tenant_id = _context_tenant_id(context)
+        if not tenant_id:
+            context['_last_purchase_unit_cost_map'] = {}
+        else:
+            from .cogs_method import last_purchase_unit_costs
+            context['_last_purchase_unit_cost_map'] = last_purchase_unit_costs(
+                tenant_id=tenant_id,
+                product_ids=context.get('last_purchase_price_product_ids'),
+                as_of=timezone.localdate(),
+            )
+    return context['_last_purchase_unit_cost_map']
+
+
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     price_tiers = ProductPriceTierSerializer(many=True, required=False)
@@ -297,6 +353,9 @@ class ProductSerializer(serializers.ModelSerializer):
     # (`_indicative_purchase_price_map`) لا استعلامَ لكل صفّ.
     indicative_purchase_price = serializers.SerializerMethodField()
     indicative_purchase_price_source = serializers.SerializerMethodField()
+    # M3-COGS: متوسط تكلفة المخزون من الطبقات المفتوحة (ليس Product.avg_cost) وتكلفة الطريقة المختارة.
+    inventory_avg_cost = serializers.SerializerMethodField()
+    method_cost = serializers.SerializerMethodField()
     # #233: سببٌ يفرض الرقم التسلسلي على هذا المنتج (نصُّه من مزوِّدٍ خارج
     # هذه الوحدة — عبر `core.hooks.serial_requirements` لا
     # استيرادٍ مباشر) — `None` حين لا فرض. نداءٌ واحد للصفحة كلّها
@@ -349,6 +408,7 @@ class ProductSerializer(serializers.ModelSerializer):
             # مستقلاً يُعرض خلف تفاصيل الصفّ.
             'last_purchase_price',
             'indicative_purchase_price', 'indicative_purchase_price_source',
+            'inventory_avg_cost', 'method_cost',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
             # C2: عددُ براندات الأب — لا على عقد `view=lookup` (القائمة أدناه صريحة).
@@ -463,6 +523,25 @@ class ProductSerializer(serializers.ModelSerializer):
     def get_indicative_purchase_price_source(self, obj):
         row = _indicative_purchase_price_map(self.context).get(obj.id)
         return row['source_label'] if row else None
+
+    def get_inventory_avg_cost(self, obj):
+        val = _inventory_avg_cost_map(self.context).get(obj.id)
+        return str(val) if val is not None else None
+
+    def get_method_cost(self, obj):
+        method = _tenant_cogs_method_cached(self.context)
+        if not method:
+            return None
+        if method == COGS_METHOD_STANDARD:
+            if obj.standard_cost is not None:
+                return str(Decimal(str(obj.standard_cost)).quantize(Q4))
+            return self.get_inventory_avg_cost(obj)
+        if method == COGS_METHOD_LAST_PURCHASE:
+            val = _last_purchase_unit_cost_map(self.context).get(obj.id)
+            if val is not None:
+                return str(Decimal(str(val)).quantize(Q4))
+            return self.get_inventory_avg_cost(obj)
+        return self.get_inventory_avg_cost(obj)
 
     def get_serial_required_by(self, obj):
         row = self.context.get('serial_requirement_map')

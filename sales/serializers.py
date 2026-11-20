@@ -1068,6 +1068,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "cost_variance_account",
             "cost_variance_account_name",
             "cogs_cost_method",
+            "product_price_column",
             "default_ar_account",
             "default_payment_type",
             "stock_on_post_default",

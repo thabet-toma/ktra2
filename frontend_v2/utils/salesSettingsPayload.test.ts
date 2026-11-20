@@ -39,3 +39,10 @@ test('سياسة ترحيل ما لم يوافق عليه الزبون تُرس�
   } as SalesSettings);
   assert.equal(payload.customer_approval_post_policy, 'save_only');
 });
+
+test('عمود السعر في جدول المنتجات يُرسَل عند الحفظ', () => {
+  const payload = salesSettingsWritablePayload({
+    ...base, product_price_column: 'inventory_avg',
+  } as SalesSettings);
+  assert.equal(payload.product_price_column, 'inventory_avg');
+});

@@ -792,3 +792,74 @@ class SalesSettingsTenantScopeTest(APITestCase):
         self.assertIn("cost_variance_account", by_field)
         self.assertIn(expected_cogs.code, by_field["cost_variance_account"]["old"])
         self.assertIn(ss.cost_variance_account.code, by_field["cost_variance_account"]["new"])
+
+
+class SalesSettingsProductPriceColumnTest(APITestCase):
+    """M3-COGS: إعداد عمود السعر الأساسي في جدول المنتجات."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="price_col_owner", password="x")
+        Currency.objects.get_or_create(Code="ILS", defaults={"Name": "شيكل", "IsBaseCurrency": True})
+        cls.tenant = create_company("شركة عمود السعر", cls.user)
+
+    def _auth(self, user=None, tenant=None):
+        self.client.force_authenticate(user=user or self.user)
+        return {"HTTP_X_TENANT_ID": str((tenant or self.tenant).TenantID)}
+
+    def test_product_price_column_defaults_to_last_purchase(self):
+        res = self.client.get("/api/sales/settings/current/", **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["product_price_column"], "last_purchase")
+
+    def test_product_price_column_patch_persists_and_rejects_unknown_value(self):
+        res = self.client.patch(
+            "/api/sales/settings/current/",
+            {"product_price_column": "inventory_avg"},
+            format="json",
+            **self._auth(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["product_price_column"], "inventory_avg")
+        self.assertEqual(
+            SalesSettings.objects.get(tenant=self.tenant).product_price_column,
+            "inventory_avg",
+        )
+
+        bad = self.client.patch(
+            "/api/sales/settings/current/",
+            {"product_price_column": "bogus"},
+            format="json",
+            **self._auth(),
+        )
+        self.assertEqual(bad.status_code, 400, bad.content)
+        self.assertIn("product_price_column", bad.json())
+
+    def test_product_price_column_requires_manage_perm_and_writes_no_cogs_audit_row(self):
+        seller = User.objects.create_user(username="price_col_seller", password="x")
+        UserCompanyMembership.objects.create(user=seller, tenant=self.tenant, role="sales")
+        denied = self.client.patch(
+            "/api/sales/settings/current/",
+            {"product_price_column": "standard"},
+            format="json",
+            **self._auth(user=seller),
+        )
+        self.assertEqual(denied.status_code, 403, denied.content)
+        self.assertEqual(
+            SalesSettings.objects.get(tenant=self.tenant).product_price_column,
+            "last_purchase",
+        )
+
+        res = self.client.patch(
+            "/api/sales/settings/current/",
+            {"product_price_column": "method_cost"},
+            format="json",
+            **self._auth(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            ActivityLog.objects.filter(
+                tenant=self.tenant, entity_type="sales_settings",
+            ).count(),
+            0,
+        )

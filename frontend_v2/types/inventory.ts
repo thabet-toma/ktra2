@@ -52,6 +52,12 @@ export interface SqlProduct {
   indicative_purchase_price?: string | null;
   /** لافتة مصدر السعر التقديري، مثل «أقل شراء (آخر ٥)» — تحمل النافذة صراحةً. */
   indicative_purchase_price_source?: string | null;
+  /** M1A-COGS: التكلفة المعيارية الاختيارية («السعر الثابت») على المنتج. */
+  standard_cost?: string | null;
+  /** M3-COGS: متوسط تكلفة المخزون من الطبقات المفتوحة (ليس Product.avg_cost). */
+  inventory_avg_cost?: string | null;
+  /** M3-COGS: التكلفة حسب طريقة تكلفة المبيعات المختارة للشركة. */
+  method_cost?: string | null;
   /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي (يفعّله كرت المنتج). */
   is_serialized?: boolean;
   /** T4: المنتج الموقوف يغيب عن المنتقيات والمستندات الجديدة. غائبٌ = نشط. */

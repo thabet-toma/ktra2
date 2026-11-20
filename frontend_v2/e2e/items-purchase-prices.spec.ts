@@ -45,6 +45,7 @@ const PRODUCT_DETAIL_8 = {
   display_name: 'بطارية 70A', brand: 'فارتا', avg_cost: '55', sale_price: '80',
   last_purchase_price: null, indicative_purchase_price: null,
   indicative_purchase_price_source: null,
+  inventory_avg_cost: null, method_cost: null, standard_cost: null,
 };
 
 const FAMILY_ANCHOR: ItemsTreeProductRow = {
@@ -56,6 +57,7 @@ const FAMILY_ANCHOR: ItemsTreeProductRow = {
   family_id: 40, family_name: 'زيت محرك', family_brand_count: 2,
   last_purchase_price: '60', indicative_purchase_price: '50',
   indicative_purchase_price_source: 'أقل شراء (آخر ٥)',
+  inventory_avg_cost: '48', method_cost: '52', standard_cost: '42',
 };
 
 /** براندٌ ثانٍ للمنتج نفسه: سعرٌ مختلف (٧٠) — الصفّ المجمّع لا يجمع الأسعار. */
@@ -64,6 +66,7 @@ const FAMILY_SIBLING: ItemsTreeProductRow = {
   id: 71, sku: 'OIL-71', display_name: 'زيت محرك — موبيل', brand: 'موبيل',
   quantity_on_hand: '2', avg_cost: '65', last_purchase_price: '70',
   indicative_purchase_price: '55',
+  inventory_avg_cost: '64', method_cost: '68', standard_cost: '44',
 };
 
 test.beforeEach(async ({ page }) => {
@@ -108,19 +111,22 @@ test('الرقم الأساسي آخر سعر شراء، والأقلّ داخل
   await expect(page.getByRole('columnheader', { name: /أقلّ شراء/ })).toHaveCount(0);
 
   const cell = priceCell(page, 'إطار 205/55 — ميشلان');
-  await expect(cell.getByTestId('purchase-last-price')).toHaveText('40');
+  await expect(cell.getByTestId('product-price-primary')).toHaveText('40');
 
   // التفاصيل مغلقة افتراضياً، والأقلّ (٢٠) غير ظاهرٍ قبل الفتح.
   const details = cell.locator('details');
   expect(await details.evaluate((el: HTMLDetailsElement) => el.open)).toBe(false);
-  await expect(cell.getByTestId('purchase-lowest-price')).not.toBeVisible();
+  await expect(cell.getByTestId('product-price-detail-lowest_purchase')).not.toBeVisible();
 
   await cell.getByText('تفاصيل السعر').click();
 
   expect(await details.evaluate((el: HTMLDetailsElement) => el.open)).toBe(true);
-  await expect(cell.getByTestId('purchase-lowest-price')).toContainText('أقلّ شراء (آخر ٥): 20');
+  await expect(cell.getByTestId('product-price-detail-lowest_purchase')).toContainText('أقلّ شراء (آخر ٥): 20');
+  await expect(cell.getByTestId('product-price-detail-method_cost')).toContainText('التكلفة حسب الطريقة المختارة: 35');
+  await expect(cell.getByTestId('product-price-detail-inventory_avg')).toContainText('متوسط تكلفة المخزون: 32');
+  await expect(cell.getByTestId('product-price-detail-standard')).toContainText('السعر الثابت: 25');
   // والرقم الأساسي لم يتغيّر بفتح التفاصيل (لا عمودان يعرضان رقمين متبادلين).
-  await expect(cell.getByTestId('purchase-last-price')).toHaveText('40');
+  await expect(cell.getByTestId('product-price-primary')).toHaveText('40');
   await expect(cell).not.toContainText('30');
   await expectNoHorizontalOverflow(cell);
 
@@ -147,7 +153,7 @@ test('منتج بلا تاريخ شراء: شرطة لا متوسط التكلف
   await switchItemsToTable(page);
 
   const cell = priceCell(page, 'بطارية 70A');
-  await expect(cell.getByTestId('purchase-last-price')).toHaveText('—');
+  await expect(cell.getByTestId('product-price-primary')).toHaveText('—');
   await expect(cell).not.toContainText('55');
 
   await page.getByTitle('SKU-8').first().dblclick();
@@ -164,13 +170,13 @@ test('الصفّ المجمّع يحتفظ بمعنى البراند المرج�
 
   // الصفّ المجمّع (المنتج ٤٠) — البراند المرجعي أصغر معرّفاً (٧٠ · «شل» · ٦٠).
   const row = page.locator('tbody tr', { hasText: 'زيت محرك' }).first();
-  await expect(row.getByTestId('purchase-last-price')).toHaveText('60');
+  await expect(row.getByTestId('product-price-primary')).toHaveText('60');
   // لا مجموع (١٣٠) ولا متوسط (٦٥): التجميع كما كان — السعر لبراندٍ واحد.
   await expect(row).not.toContainText('130');
   await expect(row).not.toContainText('65');
 
   await row.getByText('تفاصيل السعر').click();
-  await expect(row.getByTestId('purchase-lowest-price')).toContainText('أقلّ شراء (آخر ٥): 50');
+  await expect(row.getByTestId('product-price-detail-lowest_purchase')).toContainText('أقلّ شراء (آخر ٥): 50');
   // مصدر الصفّ المجمّع يُسمّى صراحةً: سعر براندٍ مرجعيٍّ لا يغطّي إخوته.
   await expect(row.getByTestId('purchase-price-anchor-hint')).toContainText('شل');
   await expect(row.getByTestId('purchase-price-anchor-hint')).toContainText('2');
@@ -180,7 +186,33 @@ test('الصفّ المجمّع يحتفظ بمعنى البراند المرج�
   // الكشف القائم لم يُمَسّ: البراند الثاني ما زال صفّاً مستقلاً بسعره هو.
   await row.getByRole('button', { name: /إظهار البراندات/ }).click();
   const sibling = page.locator('tbody tr', { hasText: 'زيت محرك — موبيل' });
-  await expect(sibling.getByTestId('purchase-last-price')).toHaveText('70');
+  await expect(sibling.getByTestId('product-price-primary')).toHaveText('70');
 
   await page.screenshot({ path: test.info().outputPath('grouped-row-details.png'), fullPage: true });
+});
+
+test('إعداد الشركة inventory_avg يغيّر عنوان العمود والرقم الأساسي وينقل آخر شراء للتفاصيل', async ({ page }) => {
+  await installItemsTreeApiStubs(page, {
+    extraProducts: [FAMILY_ANCHOR, FAMILY_SIBLING],
+    productDetails: { 7: PRODUCT_DETAIL_7, 8: PRODUCT_DETAIL_8 },
+    productPriceColumn: 'inventory_avg',
+  });
+
+  await page.goto('/items');
+  await switchItemsToTable(page);
+
+  await expect(page.getByRole('columnheader', { name: 'متوسط تكلفة المخزون' })).toBeVisible();
+  await expect(page.getByRole('columnheader', { name: 'آخر سعر شراء' })).toHaveCount(0);
+
+  const cell = priceCell(page, 'إطار 205/55 — ميشلان');
+  await expect(cell.getByTestId('product-price-primary')).toHaveText('32');
+  await expect(cell).not.toContainText('30');
+
+  await cell.getByText('تفاصيل السعر').click();
+  await expect(cell.getByTestId('product-price-detail-last_purchase')).toContainText('آخر سعر شراء: 40');
+  await expect(cell.getByTestId('product-price-detail-inventory_avg')).toHaveCount(0);
+
+  const emptyCell = priceCell(page, 'بطارية 70A');
+  await expect(emptyCell.getByTestId('product-price-primary')).toHaveText('—');
+  await expect(emptyCell).not.toContainText('55');
 });

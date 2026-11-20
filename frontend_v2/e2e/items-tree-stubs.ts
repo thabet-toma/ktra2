@@ -37,6 +37,10 @@ export type ItemsTreeProductRow = {
   /** #133: أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة (خلف «تفاصيل السعر» في الجدول). */
   indicative_purchase_price?: string | null;
   indicative_purchase_price_source?: string | null;
+  /** M3-COGS: التكلفة الثابتة · متوسط تكلفة المخزون من الطبقات · تكلفة الطريقة المختارة. */
+  standard_cost?: string | null;
+  inventory_avg_cost?: string | null;
+  method_cost?: string | null;
   /** #23: براندات المنتج الواحد تتجمّع في صفٍّ واحد — الصفّ يحمل اسم الأب ومعرّفه. */
   family_id?: number | null;
   family_name?: string | null;
@@ -65,19 +69,21 @@ export const PRODUCTS: ItemsTreeProductRow[] = [
     category: 3, category_name: 'إطارات', quantity_on_hand: '12', reserved_quantity: '0',
     available_quantity: '12', avg_cost: '30', sale_price: '45', min_stock_level: 2,
     stock_status: 'in_stock', has_group: false, group_key: null,
-    // ITEM-PURCHASE-DISPLAY: ثلاثة أرقام متمايزة — متوسط ٣٠ · أقلّ ٢٠ · آخر ٤٠ —
-    // فأيّ توصيلٍ خاطئ في الجدول أو الكرت يسقط الاختبار برقمٍ ظاهر.
+    // ITEM-PURCHASE-DISPLAY / M3-COGS: أرقام متمايزة — متوسط دفتر ٣٠ · أقلّ ٢٠ ·
+    // آخر ٤٠ · متوسط طبقات ٣٢ · طريقة ٣٥ · ثابت ٢٥.
     last_purchase_price: '40', indicative_purchase_price: '20',
     indicative_purchase_price_source: 'أقل شراء (آخر ٥)',
+    inventory_avg_cost: '32', method_cost: '35', standard_cost: '25',
   },
   {
     id: 8, sku: 'SKU-8', name_ar: 'بطارية 70A', name_en: '', display_name: 'بطارية 70A',
     category: 3, category_name: 'إطارات', quantity_on_hand: '0', reserved_quantity: '0',
     available_quantity: '0', avg_cost: '55', sale_price: '80', min_stock_level: 1,
     stock_status: 'out_of_stock', has_group: false, group_key: null,
-    // بلا شراء مرحَّل: الفراغ يبقى فراغاً في القائمة والكرت — لا ٥٥ متوسطَ التكلفة.
+    // بلا شراء مرحَّل ولا طبقات: الفراغ يبقى فراغاً — لا ٥٥ متوسطَ التكلفة.
     last_purchase_price: null, indicative_purchase_price: null,
     indicative_purchase_price_source: null,
+    inventory_avg_cost: null, method_cost: null, standard_cost: null,
   },
 ];
 
@@ -123,6 +129,8 @@ export type ItemsTreeStubsOptions = {
   onCreateCategory?: (body: Record<string, unknown>) => void;
   /** صلاحيات `/permissions/me/` (الافتراضي: عرض وإدارة المنتجات). */
   permissions?: string[];
+  /** M3-COGS: إعداد عمود السعر الأساسي في جدول المنتجات (الافتراضي last_purchase). */
+  productPriceColumn?: string;
 };
 
 /**
@@ -213,6 +221,8 @@ function createdProductRow(
     quantity_on_hand: '0', reserved_quantity: '0', available_quantity: '0', avg_cost: '0',
     sale_price: sent.sale_price ?? null,
     purchased_qty: '0', avg_monthly_sales: '0',
+    standard_cost: sent.standard_cost ?? null,
+    inventory_avg_cost: null, method_cost: null,
     last_purchase_price: null,
     indicative_purchase_price: null, indicative_purchase_price_source: null,
     stock_status: 'out_of_stock', group_key: null,
@@ -498,6 +508,20 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
       body = {
         role: 'manager', is_manager: true, ui_mode: 'advanced',
         permissions,
+      };
+    } else if (path.endsWith('/sales/settings/current/')) {
+      // شاشة الأصناف تقرأ الإعداد فقط — لا كتابة عليه من هنا.
+      if (method !== 'GET') {
+        await route.fulfill({
+          status: 405,
+          contentType: 'application/json',
+          body: JSON.stringify({ detail: `Method "${method}" not allowed.` }),
+        });
+        return;
+      }
+      body = {
+        id: 1,
+        product_price_column: options.productPriceColumn ?? 'last_purchase',
       };
     } else if (path.endsWith('/inventory/categories/')) {
       body = categories;

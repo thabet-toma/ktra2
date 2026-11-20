@@ -30,6 +30,7 @@ const WRITABLE_KEYS = [
   'allow_document_delete',
   'block_reserved_stock_sale',
   'serial_entry_mode',
+  'product_price_column',
   'default_shipping_origin',
   'default_shipping_destination',
   'delivery_doc_label',

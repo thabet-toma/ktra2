@@ -152,3 +152,20 @@ test('T4: كل البراندات موقوفة ⇒ الصفّ موقوف (يُل
 test('T4: غياب الحقل يعني نشطاً (خادمٌ لا يُعلنه بعد)', () => {
   assert.equal(buildFamilyRow([brand({ id: 6, family_id: 10 })]).is_active, true);
 });
+
+test('M3-COGS: حقول التكلفة الجديدة تُحمل من البراند المرجعي تماماً كآخر سعر شراء', () => {
+  const merged = buildFamilyRow([
+    brand({
+      id: 5, family_id: 11,
+      last_purchase_price: '60', inventory_avg_cost: '48', method_cost: '52', standard_cost: '45',
+    }),
+    brand({
+      id: 6, family_id: 11,
+      last_purchase_price: '70', inventory_avg_cost: '65', method_cost: '68', standard_cost: '62',
+    }),
+  ]);
+  assert.equal(merged.last_purchase_price, '60');
+  assert.equal(merged.inventory_avg_cost, '48');
+  assert.equal(merged.method_cost, '52');
+  assert.equal(merged.standard_cost, '45');
+});
