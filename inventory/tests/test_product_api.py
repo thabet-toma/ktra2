@@ -40,6 +40,31 @@ def _posted_purchase(tenant, supplier, product, *, number, date, price):
     return inv
 
 
+def _make_purchase_layer(
+    tenant, product, *, qty, unit_cost, layer_date,
+    reference_type="PURCHASE_INVOICE", is_provisional=False,
+):
+    mv = StockMovement.objects.create(
+        tenant=tenant,
+        product=product,
+        movement_type="IN",
+        quantity=Decimal(str(qty)),
+        unit_cost=Decimal(str(unit_cost)),
+        total_cost=(Decimal(str(qty)) * Decimal(str(unit_cost))).quantize(Decimal("0.01")),
+        reference_type=reference_type,
+        movement_date=layer_date,
+    )
+    return StockLayer.objects.create(
+        tenant=tenant,
+        product=product,
+        layer_date=layer_date,
+        original_qty=Decimal(str(qty)),
+        remaining_qty=Decimal(str(qty)),
+        unit_cost=Decimal(str(unit_cost)),
+        source_movement=mv,
+        is_provisional=is_provisional,
+    )
+
 
 class ProductApiTest(APITestCase):
     @classmethod
@@ -256,6 +281,9 @@ class ProductApiTest(APITestCase):
             # T2: `is_active` — المنتقي يعرض المعطَّل حين تُطلب `status=all`
             # (مستندٌ قديم يحمل منتجاً عُطِّل لاحقاً)، فيلزمه أن يعرف أيّها معطَّل.
             "is_active",
+            # M2-COGS: `cogs_method_unit_cost` — التكلفة المتوقَّعة لطريقة الشركة
+            # (`standard`/`last_purchase`) أو `None` (مرآة `_loss_lines` في المحرّر).
+            "cogs_method_unit_cost",
         }
 
     def test_lookup_list_exposes_every_brand_of_a_family_each_with_the_brand_in_its_name(self):
@@ -313,6 +341,10 @@ class ProductApiTest(APITestCase):
         `serial_requirement_map` — نداءُ `core.hooks.serial_requirements`
         الواحد لهذه الصفحة (`ProductViewSet._serial_requirement_map`) يفتح
         استعلاماً إضافياً ثابتاً واحداً (سياسات الكفالة)، لا استعلاماً لكل صفّ.
+
+        والحدّ صار ٩ لا ٨ بعد M2-COGS: `cogs_method_unit_cost` يقرأ
+        `_tenant_cogs_method_cached` — استعلامٌ واحدٌ ثابت على `SalesSettings`
+        للصفحة كلّها (وفي `fifo` لا يفتح استعلام طبقات الشراء أصلاً).
         """
         for i in range(10):
             create_product_with_family(tenant=self.t_a, name_ar=f"منتج {i}", sku=f"FAMQ-{i}")
@@ -323,7 +355,7 @@ class ProductApiTest(APITestCase):
 
         assert res.status_code == 200, res.content[:300]
         assert len(res.json()) == 10
-        assert len(captured) <= 8, [q["sql"] for q in captured]
+        assert len(captured) <= 9, [q["sql"] for q in captured]
 
     # ── «آخر سعر شراء» على قائمة المنتجات (ITEM-PURCHASE-DISPLAY) ──
     def test_list_exposes_last_purchase_price_apart_from_lowest_and_avg_cost(self):
@@ -1065,31 +1097,6 @@ class ProductApiTest(APITestCase):
         assert bad.status_code == 400, bad.content[:300]
 
     # ── M3-COGS: inventory_avg_cost و method_cost في Product API + الدفعة الواحدة ──
-    def _make_purchase_layer(
-        self, tenant, product, *, qty, unit_cost, layer_date,
-        reference_type="PURCHASE_INVOICE", is_provisional=False,
-    ):
-        mv = StockMovement.objects.create(
-            tenant=tenant,
-            product=product,
-            movement_type="IN",
-            quantity=Decimal(str(qty)),
-            unit_cost=Decimal(str(unit_cost)),
-            total_cost=(Decimal(str(qty)) * Decimal(str(unit_cost))).quantize(Decimal("0.01")),
-            reference_type=reference_type,
-            movement_date=layer_date,
-        )
-        return StockLayer.objects.create(
-            tenant=tenant,
-            product=product,
-            layer_date=layer_date,
-            original_qty=Decimal(str(qty)),
-            remaining_qty=Decimal(str(qty)),
-            unit_cost=Decimal(str(unit_cost)),
-            source_movement=mv,
-            is_provisional=is_provisional,
-        )
-
     def test_list_exposes_inventory_avg_cost_from_open_layers_not_product_avg_cost(self):
         p_layers = Product.objects.create(
             tenant=self.t_a, sku="IAVG-1", name_ar="له طبقات",
@@ -1099,11 +1106,11 @@ class ProductApiTest(APITestCase):
             tenant=self.t_a, sku="IAVG-2", name_ar="بلا طبقات مفتوحة",
             avg_cost=Decimal("55.0000"),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_layers, qty=8, unit_cost=10,
             layer_date=datetime.date(2026, 6, 1),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_layers, qty=4, unit_cost=16,
             layer_date=datetime.date(2026, 6, 2),
         )
@@ -1126,13 +1133,13 @@ class ProductApiTest(APITestCase):
             tenant=self.t_a, sku="MC-NOSTD", name_ar="بلا معياري",
             standard_cost=None,
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_std, qty=5, unit_cost=10, layer_date=today - datetime.timedelta(days=2),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_std, qty=5, unit_cost=20, layer_date=today - datetime.timedelta(days=1),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_no_std, qty=4, unit_cost=15, layer_date=today - datetime.timedelta(days=1),
         )
         self._auth()
@@ -1167,27 +1174,27 @@ class ProductApiTest(APITestCase):
         p2 = Product.objects.create(tenant=self.t_a, sku="LPUC-2", name_ar="ثان")
         p3 = Product.objects.create(tenant=self.t_a, sku="LPUC-3", name_ar="بلا شراء")
 
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p1, qty=3, unit_cost=11, layer_date=datetime.date(2026, 6, 1),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p1, qty=2, unit_cost=14, layer_date=datetime.date(2026, 6, 10),
         )
         # Provisional layer on same/later date must be ignored
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p1, qty=1, unit_cost=99, layer_date=datetime.date(2026, 6, 10),
             is_provisional=True,
         )
         # Future layer beyond as_of must be ignored
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p1, qty=1, unit_cost=88, layer_date=datetime.date(2026, 6, 11),
         )
         # Non-purchase movement must be ignored
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p2, qty=5, unit_cost=50, layer_date=datetime.date(2026, 6, 5),
             reference_type="ADJUST_IN",
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p2, qty=5, unit_cost=22, layer_date=datetime.date(2026, 6, 4),
         )
 
@@ -1219,7 +1226,7 @@ class ProductApiTest(APITestCase):
                 tenant=self.t_a, sku=f"M3Q-{i}", name_ar=f"دفعة م3 {i}",
                 standard_cost=Decimal("5.0000"),
             )
-            self._make_purchase_layer(
+            _make_purchase_layer(
                 self.t_a, p, qty=4, unit_cost=10 + i, layer_date=today,
             )
         self._auth()
@@ -1244,16 +1251,16 @@ class ProductApiTest(APITestCase):
             tenant=self.t_a, sku="ISO-A", name_ar="منتج أ", standard_cost=Decimal("9.0000"),
         )
         # Tenant A: 1 @ 10 + 1 @ 14 -> open-layer avg = 12, latest purchase = 14
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_a, qty=1, unit_cost=10,
             layer_date=today - datetime.timedelta(days=2),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_a, qty=1, unit_cost=14,
             layer_date=today - datetime.timedelta(days=1),
         )
         # Foreign tenant layer with a PURCHASE_INVOICE movement and LATER date than tenant A's purchase
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_b, p_a, qty=10, unit_cost=500,
             layer_date=today, reference_type="PURCHASE_INVOICE",
         )
@@ -1283,19 +1290,19 @@ class ProductApiTest(APITestCase):
         p_zero = Product.objects.create(tenant=self.t_a, sku="DAC-3", name_ar="صفر")
         p_other = Product.objects.create(tenant=self.t_b, sku="DAC-B", name_ar="شركة ب")
 
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_layers, qty=8, unit_cost=10, layer_date=datetime.date(2026, 6, 1),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_layers, qty=4, unit_cost=16, layer_date=datetime.date(2026, 6, 2),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_frac, qty="0.3333", unit_cost="1.0001", layer_date=datetime.date(2026, 6, 1),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_a, p_frac, qty=2, unit_cost=3, layer_date=datetime.date(2026, 6, 2),
         )
-        self._make_purchase_layer(
+        _make_purchase_layer(
             self.t_b, p_other, qty=5, unit_cost=50, layer_date=datetime.date(2026, 6, 2),
         )
 
@@ -1339,7 +1346,7 @@ class ProductApiTest(APITestCase):
                 tenant=self.t_a, sku=f"UNSC-{i}", name_ar=f"بلا نطاق {i}",
                 standard_cost=Decimal("5.0000"),
             )
-            self._make_purchase_layer(
+            _make_purchase_layer(
                 self.t_a, p, qty=4, unit_cost=10 + i, layer_date=today,
             )
             created.append(p)
@@ -1398,3 +1405,189 @@ class ProductApiTest(APITestCase):
         for p in created:
             assert unscoped_by_id[p.id]["inventory_avg_cost"] == scoped_by_id[p.id]["inventory_avg_cost"]
             assert unscoped_by_id[p.id]["method_cost"] == scoped_by_id[p.id]["method_cost"]
+
+
+class ProductLookupCogsMethodUnitCostTest(APITestCase):
+    """M2-COGS: حقل `cogs_method_unit_cost` على `/api/lookup/products/` (مرآة `_loss_lines`)."""
+
+    LOOKUP_URL = "/api/lookup/products/"
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner_a = User.objects.create_user(username="m2lookup_a", password="x")
+        cls.owner_b = User.objects.create_user(username="m2lookup_b", password="x")
+        cls.t_a = create_company("شركة منتقي م2 أ", cls.owner_a)
+        cls.t_b = create_company("شركة منتقي م2 ب", cls.owner_b)
+
+    def _auth(self, user=None, tenant=None):
+        self.client.force_authenticate(user=user or self.owner_a)
+        self._tenant_id = str((tenant or self.t_a).TenantID)
+
+    def _get(self, query=""):
+        return self.client.get(self.LOOKUP_URL + query, HTTP_X_TENANT_ID=self._tenant_id)
+
+    def test_standard_returns_q4_standard_cost_including_zero_and_null_without_avg_fallback(self):
+        from sales.models import SalesSettings
+
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss.cogs_cost_method = "standard"
+        ss.save(update_fields=["cogs_cost_method"])
+
+        p_set = Product.objects.create(
+            tenant=self.t_a, sku="M2-STD-1", name_ar="بسعر ثابت",
+            standard_cost=Decimal("11.25"), avg_cost=Decimal("99.00"),
+        )
+        p_zero = Product.objects.create(
+            tenant=self.t_a, sku="M2-STD-0", name_ar="ثابت صفر",
+            standard_cost=Decimal("0"), avg_cost=Decimal("50.00"),
+        )
+        p_null = Product.objects.create(
+            tenant=self.t_a, sku="M2-STD-N", name_ar="بلا ثابت",
+            standard_cost=None, avg_cost=Decimal("33.00"),
+        )
+        Product.objects.create(
+            tenant=self.t_b, sku="M2-FOREIGN", name_ar="أجنبي",
+            standard_cost=Decimal("77.00"),
+        )
+        self._auth()
+
+        res = self._get()
+        assert res.status_code == 200, res.content[:300]
+        rows = {r["id"]: r for r in res.json()}
+        assert set(rows.keys()) == {p_set.id, p_zero.id, p_null.id}
+        assert rows[p_set.id]["cogs_method_unit_cost"] == "11.2500"
+        assert rows[p_zero.id]["cogs_method_unit_cost"] == "0.0000"
+        assert rows[p_null.id]["cogs_method_unit_cost"] is None
+
+    def test_last_purchase_returns_latest_posted_purchase_layer_and_fifo_returns_null(self):
+        from inventory.serializers import ProductLookupSerializer
+        from sales.models import SalesSettings
+
+        today = timezone.localdate()
+        p_hist = Product.objects.create(
+            tenant=self.t_a, sku="M2-LP-1", name_ar="له شراء",
+            standard_cost=Decimal("11.00"), avg_cost=Decimal("12.00"),
+        )
+        p_empty = Product.objects.create(
+            tenant=self.t_a, sku="M2-LP-2", name_ar="بلا شراء",
+            avg_cost=Decimal("25.00"),
+        )
+        _make_purchase_layer(
+            self.t_a, p_hist, qty=8, unit_cost=10,
+            layer_date=today - datetime.timedelta(days=2),
+        )
+        _make_purchase_layer(
+            self.t_a, p_hist, qty=4, unit_cost=16,
+            layer_date=today - datetime.timedelta(days=1),
+        )
+        # طبقات أحدث يجب أن يستبعدها مرشّح `_last_purchase_unit_cost_map` (مؤقتة / غير شراء / مستقبلية)
+        _make_purchase_layer(
+            self.t_a, p_hist, qty=2, unit_cost=99,
+            layer_date=today, is_provisional=True,
+        )
+        _make_purchase_layer(
+            self.t_a, p_hist, qty=2, unit_cost=88,
+            layer_date=today, reference_type="ADJUST_IN",
+        )
+        _make_purchase_layer(
+            self.t_a, p_hist, qty=2, unit_cost=77,
+            layer_date=today + datetime.timedelta(days=1),
+        )
+        # منتج شركة أخرى مع طبقة شرائه الخاصة — لا يظهر ولا يتسرّب سعره إلى شركة أ
+        p_b = Product.objects.create(
+            tenant=self.t_b, sku="M2-LP-B", name_ar="منتج ب",
+            standard_cost=Decimal("999.00"), avg_cost=Decimal("999.00"),
+        )
+        _make_purchase_layer(
+            self.t_b, p_b, qty=5, unit_cost=999,
+            layer_date=today,
+        )
+
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss.cogs_cost_method = "last_purchase"
+        ss.save(update_fields=["cogs_cost_method"])
+
+        self._auth()
+        rows = {r["id"]: r for r in self._get().json()}
+        assert p_b.id not in rows
+        assert rows[p_hist.id]["cogs_method_unit_cost"] == "16.0000"
+        assert rows[p_empty.id]["cogs_method_unit_cost"] is None
+
+        req_a = APIRequestFactory().get(self.LOOKUP_URL, HTTP_X_TENANT_ID=self._tenant_id)
+        req_a.user = self.owner_a
+        assert ProductLookupSerializer(p_b, context={"request": req_a}).data["cogs_method_unit_cost"] is None
+
+        ss.cogs_cost_method = "fifo"
+        ss.save(update_fields=["cogs_cost_method"])
+        rows_fifo = {r["id"]: r for r in self._get().json()}
+        assert rows_fifo[p_hist.id]["cogs_method_unit_cost"] is None
+        assert rows_fifo[p_empty.id]["cogs_method_unit_cost"] is None
+
+    def test_lookup_query_count_does_not_grow_with_product_count(self):
+        from sales.models import SalesSettings
+
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss.cogs_cost_method = "last_purchase"
+        ss.save(update_fields=["cogs_cost_method"])
+
+        today = timezone.localdate()
+        for i in range(5):
+            p = Product.objects.create(
+                tenant=self.t_a, sku=f"M2LQ-{i}", name_ar=f"منتقي {i}",
+                standard_cost=Decimal("5.0000"),
+            )
+            _make_purchase_layer(
+                self.t_a, p, qty=3, unit_cost=10 + i, layer_date=today,
+            )
+        self._auth()
+
+        with CaptureQueriesContext(connection) as two_q:
+            two = self._get("?page=1&page_size=2")
+        with CaptureQueriesContext(connection) as five_q:
+            five = self._get("?page=1&page_size=5")
+
+        assert len(two.json()["results"]) == 2
+        assert len(five.json()["results"]) == 5
+        assert "cogs_method_unit_cost" in five.json()["results"][0]
+        assert len(five_q) == len(two_q), [q["sql"] for q in five_q]
+
+    def test_full_product_detail_and_patch_responses_carry_cogs_method_unit_cost(self):
+        # الحقل على `ProductSerializer` (لا المنتقي وحده): محرِّر الفاتورة يستبدل صفّ المنتقي
+        # بردّ الحفظ السريع (PATCH) ويجلب المنتجات غير النشطة من `inventory/products/{id}/`.
+        from sales.models import SalesSettings
+
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss.cogs_cost_method = "standard"
+        ss.save(update_fields=["cogs_cost_method"])
+        p = Product.objects.create(
+            tenant=self.t_a, sku="M2-FULL-1", name_ar="منتج كامل",
+            standard_cost=Decimal("12.5"), avg_cost=Decimal("99.00"),
+        )
+        self._auth()
+        url = f"/api/inventory/products/{p.id}/"
+
+        got = self.client.get(url, HTTP_X_TENANT_ID=self._tenant_id)
+        assert got.status_code == 200, got.content[:300]
+        assert got.json()["cogs_method_unit_cost"] == "12.5000"
+
+        patched = self.client.patch(
+            url, {"name_ar": "منتج كامل معدَّل"}, format="json",
+            HTTP_X_TENANT_ID=self._tenant_id,
+        )
+        assert patched.status_code == 200, patched.content[:300]
+        assert patched.json()["cogs_method_unit_cost"] == "12.5000"
+
+    def test_serializer_without_tenant_in_context_returns_null(self):
+        from inventory.serializers import ProductLookupSerializer
+        from sales.models import SalesSettings
+
+        # طريقة الشركة ثابتة وللمنتج تكلفة معيارية: السبب الوحيد لـ None هو غياب الشركة من السياق.
+        ss, _ = SalesSettings.objects.get_or_create(tenant=self.t_a)
+        ss.cogs_cost_method = "standard"
+        ss.save(update_fields=["cogs_cost_method"])
+        p = Product.objects.create(
+            tenant=self.t_a, sku="M2-NOCTX", name_ar="بلا سياق",
+            standard_cost=Decimal("15.0000"),
+        )
+        data = ProductLookupSerializer(p, context={}).data
+        assert data["cogs_method_unit_cost"] is None

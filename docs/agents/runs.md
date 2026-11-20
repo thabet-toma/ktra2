@@ -236,3 +236,19 @@
 | 2026-11-19 | M3 تصليح 2 | Hydrogen agy، high | — | 1–5؛ أحمر عند tenant=None ثم أخضر |
 | 2026-11-20 | M3 بوّابات | المنسّق | — | معزولة 8107 passed/1 معروف؛ frontend 1441؛ e2e 5 passed |
 | 2026-11-20 | M3 فحص مرئي | Hydrogen agy، high | — | 16 لقطة، راجعتُها بعيني: سليمة |
+| 2026-11-20 | M2 قارئ | Hydrogen agy، high، read-only | — | 8 أسئلة، جواب 26KB |
+| 2026-11-20 | M2 تنفيذ | Hydrogen agy high | 90د (timeout) | الكود كامل؛ المهلة من انتظار 4 حراسات تمسح worktrees — بيئي |
+| 2026-11-20 | M2 مراجعة r1 | Opus×2 (Standards/Spec) | ~10د | Standards: inline style + صف مختار مخفي + stub غير مطابق + تعليقان قديمان؛ Spec: معاينة المرتجع |
+| 2026-11-20 | M2 بوّابة معزولة (قبل التصليح) | — | 12.5د | 8111 نجاح، 1 فشل معروف مسبقاً |
+| 2026-11-20 | M2 تصليح 1 | Hydrogen agy high | — | 8 إصلاحات كما الموجز؛ product_api 65، frontend 1448، e2e 1 |
+| 2026-11-20 | M2 مراجعة r2 | Opus ×2 (subagents) | — | Spec PASS؛ Standards 6 minor/6 nit — S1 خطأ حقيقي |
+| 2026-11-20 | M2 تصليح 2 | Hydrogen agy high | — | 11 إصلاحاً كما الموجز؛ product_api 65، frontend 1450، e2e 1؛ أحمر→أخضر على #5190 |
+| 2026-11-20 | M2 مراجعة r3 | Opus ×2 (subagents) | ~16 د | Spec PASS؛ Standards 1 major/4 minor/6 nit — M1 مؤكَّد بالقراءة |
+| 2026-11-20 | بوّابة معزولة (حالة تصليح 2) | — | 14:34 | 8111 passed، 1 failed (القديم المعروف) |
+| 2026-11-20 | M2 تصليح 3 | Sonnet 5.5 high (sonnet-implementer) | ~8.5 د | 7/7 مطبَّقة؛ 66 inventory، 110 sales، npm 1451، e2e 1 — أحمر→أخضر للتصليحين 1 و5 |
+| 2026-11-20 | M2 مراجعة r4 Spec + Standards | Opus 5.5 (وكيلان فرعيان) | ~3 + ~4.5 د (بعد استئناف حدّ الاستخدام) | Spec: PASS؛ Standards: CHANGES (2 minor + 3 nit، كلها stub e2e عدا nit واحد) |
+| 2026-11-20 | M2 جولة تصليح 4 | Opus 5.5 high (وكيل فرعي) | ~8 د، 27 أداة | tsc 0، npm 1451/0، e2e 1 passed؛ انحراف مقبول: فحص pk لحساب التكلفة أيضاً |
+| 2026-11-20 | M2 مراجعة r5 | Opus 5.5 ×2 (وكيلان فرعيان) | ~4 د، 45 أداة | PASS×2؛ minor: stub يقبل pk مجهولاً لحسابات أخرى، المنتقي لا يقصر على مجموعة ت.ب.م |
+| 2026-11-20 | M2 فحص بصري | gemini-4-hydrogen-high (agy، high) | — | 4/4 passed، 28 PNG، القيد متوازن، لا خلل بصري |
+| 2026-11-20 | M2 جولة تصليح 5 | Opus 5.5 high (وكيل فرعي) | ~5 د، 26 أداة | tsc 0، npm 1451/0، e2e 1 passed؛ انحراف: حسابات أصل 100/400 |
+| 2026-11-20 | M2 مراجعتا r6 (Standards + Spec) | Opus 5.5 high (وكيلان فرعيان) | ~7.5 د / ~4.5 د | PASS×2؛ minor 1 + nit 2 لكلٍّ؛ F3 وثائق أُصلح، والباقي متابعات |

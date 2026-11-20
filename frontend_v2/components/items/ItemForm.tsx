@@ -176,6 +176,8 @@ type FormState = {
   reorder_mode: string;
   /** سعر البيع الافتراضي المحفوظ على المنتج (بجانب سعر التكلفة المحسوب). */
   sale_price: string;
+  /** M2-COGS: التكلفة المعيارية الاختيارية («السعر الثابت») على المنتج. */
+  standard_cost: string;
   sale_tiers: PriceTier[];
   purchase_tiers: PriceTier[];
   sale_account: number | null; sale_return_account: number | null;
@@ -198,6 +200,7 @@ const blankForm = (): FormState => ({
   min_stock_level: "", max_stock_level: "",
   reorder_mode: "manual",
   sale_price: "",
+  standard_cost: "",
   sale_tiers: Array.from({ length: 5 }, blankTier),
   purchase_tiers: Array.from({ length: 5 }, blankTier),
   sale_account: null, sale_return_account: null,
@@ -619,6 +622,7 @@ export const ItemForm: React.FC<Props> = ({
       max_stock_level: p.max_stock_level != null ? String(p.max_stock_level) : "",
       reorder_mode: p.reorder_mode === "auto" ? "auto" : "manual",
       sale_price: p.sale_price != null ? String(p.sale_price) : "",
+      standard_cost: p.standard_cost != null ? String(p.standard_cost) : "",
       category: p.category ? Number(p.category) : null,
       category_name: String(p.category_name ?? ""),
       // is_service هو حقل الخادم الفعلي (يوجّه الترحيل لحساب مبيعات الخدمات)؛
@@ -692,6 +696,8 @@ export const ItemForm: React.FC<Props> = ({
         reorder_mode: form.reorder_mode === "auto" ? "auto" : "manual",
         // سعر البيع: فارغ = لا سعر محفوظ (البطاقة ترجع لآخر سعر بيع فعلي).
         sale_price: form.sale_price.trim() ? Number(form.sale_price) : null,
+        // M2-COGS: السعر الثابت: فارغ ⇒ null («لم يُحدَّد»)، و0 ⇒ 0 صريح.
+        standard_cost: form.standard_cost.trim() !== "" ? Number(form.standard_cost) : null,
         category: categoryId,
         // M0: وحدة القياس صارت قابلة للكتابة على الخادم — كانت تُبتلع بصمت.
         uom_id: form.uom_id,
@@ -1389,6 +1395,21 @@ export const ItemForm: React.FC<Props> = ({
             value={form.sale_price} onChange={(e) => patch("sale_price", e.target.value)}
             title="يُقترح في مستند البيع فقط للزبون الذي لا عرض سعر له ولا شراء سابق لهذا المنتج"
             placeholder="للزبون بلا عرض ولا شراء سابق" />)}
+        <div>
+          {fld("السعر الثابت (التكلفة المعيارية)",
+            <input
+              className="ktra-input"
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.standard_cost}
+              onChange={(e) => patch("standard_cost", e.target.value)}
+              placeholder="لم يُحدَّد"
+            />)}
+          <div className="ktra-hint">
+            يُستخدم فقط عندما تكون طريقة تكلفة المبيعات في الشركة «السعر الثابت».
+          </div>
+        </div>
         {fld("متوسط تكلفة المخزون (محسوب)",
           <input className="ktra-input" readOnly value={formatMoney(insights.profile?.avg_cost ?? "", "—")} />)}
         {fld("الربح للوحدة",

@@ -46,3 +46,15 @@ test('عمود السعر في جدول المنتجات يُرسَل عند ا�
   } as SalesSettings);
   assert.equal(payload.product_price_column, 'inventory_avg');
 });
+
+test('طريقة تكلفة المبيعات وحساب الفروقات يُرسلان عند الحفظ بينما يسقط الاسم المقروء فقط', () => {
+  const payload = salesSettingsWritablePayload({
+    ...base,
+    cogs_cost_method: 'standard',
+    cost_variance_account: 5190,
+    cost_variance_account_name: 'فروقات تكلفة المبيعات',
+  } as SalesSettings) as Record<string, unknown>;
+  assert.equal(payload.cogs_cost_method, 'standard');
+  assert.equal(payload.cost_variance_account, 5190);
+  assert.equal('cost_variance_account_name' in payload, false);
+});

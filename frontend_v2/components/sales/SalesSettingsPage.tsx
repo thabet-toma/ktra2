@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { humanizeThrown } from "../../utils/drfError";
 import { useConfirm } from "../../contexts/ConfirmContext";
-import { Boxes, Info, Landmark, Loader2, MapPin, Network, Percent, Save, Send, SlidersHorizontal, Tag, Truck, UserRound, Wallet } from "lucide-react";
+import { Boxes, Calculator, Info, Landmark, Loader2, MapPin, Network, Percent, Save, Send, SlidersHorizontal, Tag, Truck, UserRound, Wallet } from "lucide-react";
 import {
   getSalesSettings,
   updateSalesSettings,
@@ -19,6 +19,7 @@ import {
   type SalesSettings,
   type StockLossPolicy,
 } from "../../services/salesApi";
+import { invalidatePickerProducts } from "../../services/inventoryApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { salesSettingsWritablePayload } from "../../utils/salesSettingsPayload";
@@ -35,6 +36,15 @@ import {
   normalizeProductPriceColumn,
   type ProductPriceColumn,
 } from "../../utils/productPriceColumn";
+import {
+  COGS_COST_METHOD_OPTIONS,
+  DEFAULT_COGS_EXAMPLE_SCENARIO,
+  computeCogsExampleRows,
+  formatCogsVariance,
+  isFixedSnapshotMethod,
+  normalizeCogsCostMethod,
+  type CogsCostMethod,
+} from "../../utils/cogsCostMethod";
 
 // ثلاث حالات للسياستين (الرصيد السالب / البيع بخسارة) — تطابق `SalesSettings.POLICY_CHOICES`.
 const POLICY_OPTIONS = (Object.keys(STOCK_LOSS_POLICY_LABELS) as StockLossPolicy[]).map(
@@ -44,6 +54,7 @@ const POLICY_OPTIONS = (Object.keys(STOCK_LOSS_POLICY_LABELS) as StockLossPolicy
 const CUSTOMER_APPROVAL_POLICY_OPTIONS = (
   Object.keys(CUSTOMER_APPROVAL_POLICY_LABELS) as CustomerApprovalPostPolicy[]
 ).map((value) => ({ value, label: CUSTOMER_APPROVAL_POLICY_LABELS[value] }));
+const COGS_EXAMPLE_ROWS = computeCogsExampleRows();
 const POLICY_HINT =
   "المسودة لا تحرّك مخزونًا ولا قيدًا محاسبيًا؛ «السماح بالحفظ كمسودة» يمنع الترحيل وحده، و«المنع» يرفض الحفظ أيضًا.";
 
@@ -102,6 +113,7 @@ const input =
 
 export const SalesSettingsPage: React.FC = () => {
   const [settings, setSettings] = useState<SalesSettings | null>(null);
+  const [loadedCogsMethod, setLoadedCogsMethod] = useState<CogsCostMethod>("fifo");
   const [accounts, setAccounts] = useState<AccountOpt[]>([]);
   const [currencies, setCurrencies] = useState<CurrOpt[]>([]);
   const [customers, setCustomers] = useState<PartnerRow[]>([]);
@@ -129,6 +141,7 @@ export const SalesSettingsPage: React.FC = () => {
 
       if (ssRes.status === "fulfilled" && ssRes.value) {
         setSettings(ssRes.value);
+        setLoadedCogsMethod(normalizeCogsCostMethod(ssRes.value.cogs_cost_method));
       } else {
         // Core settings object failed to load; the form gates on `settings`
         // being non-null and shows this error instead of white-screening.
@@ -168,12 +181,24 @@ export const SalesSettingsPage: React.FC = () => {
 
   const handleSave = async () => {
     if (!settings) return;
+    const nextCogsMethod = normalizeCogsCostMethod(settings.cogs_cost_method);
+    if (nextCogsMethod !== loadedCogsMethod) {
+      const ok = await confirm({
+        danger: false,
+        title: "تغيير طريقة التكلفة",
+        message:
+          "تُطبَّق الطريقة الجديدة على المبيعات المرحَّلة من اليوم فصاعداً، ولا يُعاد احتساب الفواتير المرحَّلة سابقاً، ويُسجَّل التغيير بمَن غيّر ومتى.",
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     setMsg(null);
     setErr(null);
     try {
       const updated = await updateSalesSettings(salesSettingsWritablePayload(settings));
       setSettings(updated);
+      setLoadedCogsMethod(normalizeCogsCostMethod(updated.cogs_cost_method));
+      if (nextCogsMethod !== loadedCogsMethod) invalidatePickerProducts();
       setMsg("تم حفظ الإعدادات بنجاح");
       window.setTimeout(() => setMsg(null), 2500);
     } catch (e: unknown) {
@@ -193,6 +218,7 @@ export const SalesSettingsPage: React.FC = () => {
     try {
       const updated = await restoreSalesSettingsDefaults();
       setSettings(updated);
+      setLoadedCogsMethod(normalizeCogsCostMethod(updated.cogs_cost_method));
       setMsg("تمت استعادة خريطة القيد الافتراضية");
       window.setTimeout(() => setMsg(null), 2500);
     } catch (e: unknown) {
@@ -224,6 +250,15 @@ export const SalesSettingsPage: React.FC = () => {
       </div>
     );
   }
+
+  const selectedCogsMethod = normalizeCogsCostMethod(settings.cogs_cost_method);
+  const fixedMethodSelected = isFixedSnapshotMethod(selectedCogsMethod);
+  const varianceAccountId = settings.cost_variance_account;
+  const varianceAccountText =
+    (varianceAccountId != null && accounts.some((x) => x.id === varianceAccountId)
+      ? acctName(varianceAccountId)
+      : settings.cost_variance_account_name)
+    || (varianceAccountId != null ? `#${varianceAccountId}` : "حساب فروقات التكلفة");
 
   const toolbarActions: KitToolbarAction[] = [
     {
@@ -775,6 +810,17 @@ export const SalesSettingsPage: React.FC = () => {
                     <td className="p-2">{acctName(settings.default_cogs_account)}</td>
                     <td className="p-2">{acctName(settings.default_inventory_account)}</td>
                   </tr>
+                  {fixedMethodSelected && (
+                    <tr>
+                      <td className="p-2">حساب فروقات التكلفة</td>
+                      <td className="p-2" colSpan={2} data-testid="journal-map-variance-account">
+                        {varianceAccountText}{" "}
+                        <span className="ktra-text-soft">
+                          (مدين أو دائن بالفرق بين تكلفة الطريقة والتكلفة الفعلية)
+                        </span>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
               <button
@@ -815,6 +861,99 @@ export const SalesSettingsPage: React.FC = () => {
                 }
               />
             </FieldLabel>
+          </Section>
+      ),
+    },
+    {
+      id: 'cogs-cost-method', title: 'طريقة تكلفة البضاعة المباعة', icon: Calculator,
+      description: 'اختيار طريقة احتساب تكلفة المبيعات وحساب فروقات التكلفة.',
+      keywords: [
+        'طريقة تكلفة البضاعة المباعة',
+        'حساب فروقات التكلفة',
+        'الوارد أولاً يصرف أولاً',
+        'السعر الثابت',
+        'التكلفة المعيارية',
+        'آخر سعر شراء',
+      ],
+      content: (
+          <Section
+            title="طريقة تكلفة البضاعة المباعة"
+            description="اختيار طريقة احتساب تكلفة المبيعات وحساب فروقات التكلفة."
+          >
+            <FieldLabel label="طريقة تكلفة البضاعة المباعة">
+              <select
+                className={input}
+                value={selectedCogsMethod}
+                onChange={(e) =>
+                  setField("cogs_cost_method", e.target.value as CogsCostMethod)
+                }
+              >
+                {COGS_COST_METHOD_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+            </FieldLabel>
+
+            <FieldLabel label="حساب فروقات التكلفة">
+              <AccountTreeField
+                accounts={accounts}
+                value={settings.cost_variance_account ?? ""}
+                onChange={(id) => setField("cost_variance_account", id)}
+                purpose="expense"
+                title="اختيار حساب فروقات التكلفة"
+              />
+              {settings.cost_variance_account_name && (
+                <div className="text-[11px] ktra-text-soft mt-1">
+                  الحالي: {settings.cost_variance_account_name}
+                </div>
+              )}
+              {fixedMethodSelected && settings.cost_variance_account == null && (
+                <div className="text-[11px] ktra-text-soft mt-1">
+                  عند ترك الحقل فارغاً، يُنشئ الحفظ حساب الفروقات الافتراضي تحت تكلفة المبيعات تلقائياً.
+                </div>
+              )}
+            </FieldLabel>
+
+            <div className="md:col-span-2 overflow-x-auto pt-1">
+              <div className="text-xs ktra-text-soft mb-2">
+                مثال توضيحي: استلام{" "}
+                {DEFAULT_COGS_EXAMPLE_SCENARIO.layers
+                  .map((l) => `${l.qty} بسعر ${l.unitCost}`)
+                  .join(" ثم ")}
+                ، وبيع {DEFAULT_COGS_EXAMPLE_SCENARIO.sellQty} (السعر الثابت{" "}
+                {DEFAULT_COGS_EXAMPLE_SCENARIO.standardUnitCost}):
+              </div>
+              <table className="w-full text-sm ktra-grid" data-variant="list" data-testid="cogs-example-table">
+                <thead>
+                  <tr>
+                    <th className="text-right p-2">الطريقة</th>
+                    <th className="text-right p-2">تكلفة المبيعات</th>
+                    <th className="text-right p-2">الفروقات</th>
+                    <th className="text-right p-2">دائن المخزون</th>
+                    <th className="text-right p-2">المخزون الباقي</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {COGS_EXAMPLE_ROWS.map((row) => {
+                    const isSelected = row.method === selectedCogsMethod;
+                    return (
+                      <tr
+                        key={row.method}
+                        data-method={row.method}
+                        data-selected={isSelected ? "true" : "false"}
+                        className={isSelected ? "ktra-row--sel font-semibold" : undefined}
+                      >
+                        <td className="p-2">{row.label}</td>
+                        <td className="p-2 ktra-num">{row.cogs}</td>
+                        <td className="p-2 ktra-num">{formatCogsVariance(row.varianceSide, row.varianceAmount)}</td>
+                        <td className="p-2 ktra-num">{row.inventoryCredit}</td>
+                        <td className="p-2 ktra-num">{row.remainingInventory}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </Section>
       ),
     },

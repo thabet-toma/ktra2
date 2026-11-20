@@ -7,7 +7,7 @@
  * الشاشة «متبقٍّ» وهميّ يقرؤه المستخدم فشلاً.
  */
 
-const round2 = (n: number) => Math.round(n * 100) / 100;
+import { isFixedSnapshotMethod, round2 } from "./cogsCostMethod.ts";
 
 export type LineInput = {
   quantity: string | number;
@@ -89,5 +89,113 @@ export function computeInvoiceTotals(
     taxAmount: taxSum,
     grandTotal: round2(exclSum + taxSum),
     perLine,
+  };
+}
+
+export type ExpectedCostProduct = {
+  avg_cost?: string | number | null;
+  cogs_method_unit_cost?: string | number | null;
+  is_service?: boolean;
+};
+
+/**
+ * التكلفة المتوقَّعة للوحدة في محرّر الفاتورة — مرآة `_loss_lines` في
+ * `sales/services/calc.py` حرفياً:
+ * لـ `standard`/`last_purchase` ومع وجود `cogs_method_unit_cost` غير فارغ
+ * يُعاد هذا الرقم (بما في ذلك الصفر الصريح)، وإلا السقوط إلى `avg_cost`
+ * (أو 0 عند غيابه).
+ */
+export function expectedUnitCost(
+  product: ExpectedCostProduct | null | undefined,
+  method?: string | null,
+): number {
+  if (!product) return 0;
+  if (
+    isFixedSnapshotMethod(method)
+    && product.cogs_method_unit_cost != null
+    && product.cogs_method_unit_cost !== ""
+  ) {
+    const n = Number(product.cogs_method_unit_cost);
+    if (Number.isFinite(n)) return n;
+  }
+  const avg = Number(product.avg_cost ?? 0);
+  return Number.isFinite(avg) ? avg : 0;
+}
+
+/**
+ * قاعدة واحدة لتكلفة الوحدة المتوقَّعة على سطر الفاتورة: المرتجع والخدمة يقارَنان
+ * بمتوسط التكلفة (سلوك ما قبل M2)، وغيرهما بتكلفة الطريقة (`expectedUnitCost`).
+ */
+export function lineExpectedUnitCost(
+  product: ExpectedCostProduct | null | undefined,
+  method: string | null | undefined,
+  isReturn: boolean,
+): number {
+  if (!product) return 0;
+  if (isReturn || product.is_service) {
+    const avg = Number(product.avg_cost ?? 0);
+    return Number.isFinite(avg) ? avg : 0;
+  }
+  return expectedUnitCost(product, method);
+}
+
+/**
+ * حالة §3.3 (منتج مخزني في `standard`/`last_purchase` بلا سعر ثابت ولا شراء
+ * سابق): يُقيَّد بالتكلفة الفعلية بلا فرق مع تنبيه غير حاجب في معاينة القيد.
+ */
+export function missingMethodCost(
+  product: ExpectedCostProduct | null | undefined,
+  method?: string | null,
+): boolean {
+  if (!product || product.is_service) return false;
+  if (!isFixedSnapshotMethod(method)) return false;
+  return product.cogs_method_unit_cost == null || product.cogs_method_unit_cost === "";
+}
+
+export type EstimateInvoiceCogsLine = {
+  product: ExpectedCostProduct | null | undefined;
+  qty: number;
+};
+
+export type InvoiceCogsEstimate = {
+  cogsTotal: number;
+  invTotal: number;
+  hasFixedMethodLine: boolean;
+  variance: number;
+};
+
+/**
+ * تقدير تكلفة المبيعات ودائن المخزون والفروقات لمعاينة قيد فاتورة البيع.
+ * على المرتجع أو غير الطرق الثابتة أو الخدمات أو غياب كلفة الطريقة تُستخدَم
+ * التكلفة الفعلية التقديرية (`avg_cost`) بلا فرق.
+ */
+export function estimateInvoiceCogs(
+  lines: readonly EstimateInvoiceCogsLine[],
+  method: string | null | undefined,
+  isReturn: boolean,
+): InvoiceCogsEstimate {
+  let cogsTotal = 0;
+  let invTotal = 0;
+  let hasFixedMethodLine = false;
+  for (const { product: p, qty } of lines) {
+    if (!p || qty <= 0) continue;
+    const actualEst = Math.max(0, Number(p.avg_cost || 0));
+    const hasMethodCost =
+      !isReturn &&
+      isFixedSnapshotMethod(method) &&
+      !p.is_service &&
+      !missingMethodCost(p, method);
+    if (hasMethodCost) hasFixedMethodLine = true;
+    const unitCogs = hasMethodCost
+      ? Math.max(0, expectedUnitCost(p, method))
+      : actualEst;
+    cogsTotal += unitCogs * qty;
+    invTotal += actualEst * qty;
+  }
+  return {
+    cogsTotal,
+    invTotal,
+    hasFixedMethodLine,
+    variance: invTotal - cogsTotal,
   };
 }

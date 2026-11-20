@@ -76,7 +76,14 @@ import { SerialEntryModal } from "../shared/SerialEntryModal";
 import { Item } from "../../types";
 import type { SerialEntryMode } from "../../types/inventory";
 import db from "../../services/offline/db";
-import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
+import {
+  computeInvoiceTotals,
+  estimateInvoiceCogs,
+  lineExpectedUnitCost,
+  missingMethodCost,
+  type LineInput,
+} from "../../utils/salesInvoiceMath";
+import type { CogsCostMethod } from "../../utils/cogsCostMethod";
 import {
   availableForSale,
   buildReservationIndex,
@@ -163,6 +170,8 @@ export type ProductRow = {
   /** «سعر البيع» العام في كرت المنتج — يُقترح حين لا سعر خاص بهذا الزبون. */
   sale_price?: string | null;
   avg_cost?: string | null;
+  /** M2-COGS: التكلفة المتوقَّعة لطريقة الشركة (`standard`/`last_purchase`) أو `null`. */
+  cogs_method_unit_cost?: string | number | null;
   /** T-SERVICELINE: خدمة لا بضاعة — بلا مخزون، وإيرادها على حساب الخدمات. */
   is_service?: boolean;
   /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي — يُظهر عمود الأرقام على سطره. */
@@ -419,6 +428,9 @@ type Props = {
     negative_stock_policy?: StockLossPolicy;
     /** T-SERIAL: نمط اختيار الوحدة المباعة — `off` يخفي العمود بالكامل. */
     serial_entry_mode?: SerialEntryMode;
+    /** M2-COGS: طريقة تكلفة المبيعات المختارة واسم حساب الفروقات. */
+    cogs_cost_method?: CogsCostMethod | null;
+    cost_variance_account_name?: string | null;
   } | null;
 };
 
@@ -1019,6 +1031,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     description?: string;
   };
 
+  const cogsMethod = salesSettings?.cogs_cost_method ?? "fifo";
+
   const journalPreview = useMemo((): {
     lines: PreviewLine[];
     totalDebit: number;
@@ -1143,17 +1157,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     // M5: cost is computed unconditionally so gross profit can be shown even
     // when stock is not deducted at post-time; the journal lines below are
     // still only emitted when stock_on_post is enabled.
-    let cogsTotal = 0;
-    for (const l of lines) {
-      if (l.product === "") continue;
-      const p = productsById.get(Number(l.product));
-      if (!p) continue;
-      const avg = Number(p.avg_cost || 0);
-      const qty = Number(l.quantity || 0);
-      if (avg > 0 && qty > 0) {
-        cogsTotal += avg * qty;
-      }
-    }
+    const { cogsTotal, invTotal, hasFixedMethodLine, variance } = estimateInvoiceCogs(
+      lines.map((l) => ({
+        product: l.product === "" ? undefined : productsById.get(Number(l.product)),
+        qty: Number(l.quantity || 0),
+      })),
+      cogsMethod,
+      isReturn,
+    );
     if (stockOnPost) {
       if (cogsTotal > 0) {
         out.push({
@@ -1163,6 +1174,27 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           credit: 0,
           description: "COGS",
         });
+      }
+      if (hasFixedMethodLine) {
+        if (Math.abs(variance) > 0.0001) {
+          out.push({
+            accountId: null,
+            accountLabel: salesSettings?.cost_variance_account_name || "حساب فروقات التكلفة",
+            debit: variance > 0 ? variance : 0,
+            credit: variance < 0 ? -variance : 0,
+            description: "فروقات تكلفة المبيعات",
+          });
+        }
+        if (invTotal > 0) {
+          out.push({
+            accountId: null,
+            accountLabel: "المخزون — تقدير التكلفة الفعلية (الطبقات تُحسم عند الترحيل)",
+            debit: 0,
+            credit: invTotal,
+            description: "صرف مخزون",
+          });
+        }
+      } else if (cogsTotal > 0) {
         out.push({
           accountId: null,
           accountLabel: "المخزون — يُحدَّد من فئة المنتج (أو 1104)",
@@ -1181,7 +1213,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         `القيد غير متوازن: مدين ${totalDebit.toFixed(2)} ≠ دائن ${totalCredit.toFixed(2)}`
       );
     }
-    // M5: gross profit = net revenue − cost of goods (estimate from WAC).
+    // Gross profit = net revenue − COGS (fixed method unit cost for standard/last_purchase on sales, else average cost estimate).
     const revenue = net;
     const grossProfit = revenue - cogsTotal;
     const marginPct = revenue > 0 ? (grossProfit / revenue) * 100 : 0;
@@ -1197,6 +1229,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       marginPct,
     };
   }, [
+    isReturn,
     invType,
     cashAccountId,
     customerId,
@@ -1208,6 +1241,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     accountsById,
     stockOnPost,
     productsById,
+    cogsMethod,
+    salesSettings?.cost_variance_account_name,
   ]);
 
   const applyDetail = useCallback((d: SalesInvoiceDetail) => {
@@ -1639,7 +1674,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   };
 
   // سياسة «فاتورة البيع بخسارة» (ثلاث حالات) — تُطابق الحارس الخادمي guard_loss_invoice:
-  // على مستوى **السطر** (صافي إيراد السطر بعد الخصومات < كمية×متوسط التكلفة)، حتى لو
+  // على مستوى **السطر** (صافي إيراد السطر بعد الخصومات < كمية×التكلفة المتوقعة `expectedUnitCost`:
+  // سعر الطريقة لـ`standard`/`last_purchase` وإلا متوسط التكلفة)، حتى لو
   // كان إجمالي الفاتورة رابحاً. الحفظ يُمنع في `block` وحدها، والترحيل في `save_only`
   // و`block` (المسودة لا تحرّك مخزوناً ولا قيداً). المراجيع والخدمات معفاة.
   const lossPolicy: StockLossPolicy = salesSettings?.loss_invoice_policy ?? "allow";
@@ -1652,7 +1688,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       if (l.product === "") continue;
       const p = productsById.get(Number(l.product));
       if (!p || p.is_service) continue;
-      const cost = Number(p.avg_cost || 0) * Number(l.quantity || 0);
+      const cost = lineExpectedUnitCost(p, cogsMethod, isReturn) * Number(l.quantity || 0);
       const revenue = totals.perLine[i]?.lineNetAdjusted ?? 0;
       if (revenue - cost < 0) {
         const name = formatProductPrimaryName(p);
@@ -2767,7 +2803,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const renderUnitPriceCell = (row: DraftLine) => {
     const p = row.product ? productsById.get(Number(row.product)) : undefined;
-    const cost = p ? Number(p.avg_cost || 0) : 0;
+    const cost = lineExpectedUnitCost(p, cogsMethod, isReturn);
     const price = Number(row.unit_price || 0);
     const belowCost = cost > 0 && price > 0 && price < cost;
 
@@ -3683,8 +3719,38 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   );
 
   /* ───────────── تبويب: معاينة القيد (M1-T4) ───────────── */
+  const missingMethodCostProducts = useMemo(() => {
+    if (isReturn) return [];
+    const seen = new Set<number>();
+    const names: string[] = [];
+    for (const l of lines) {
+      if (l.product === "") continue;
+      const pid = Number(l.product);
+      if (seen.has(pid)) continue;
+      const p = productsById.get(pid);
+      if (p && missingMethodCost(p, cogsMethod)) {
+        seen.add(pid);
+        names.push(formatProductPrimaryName(p));
+      }
+    }
+    return names;
+  }, [isReturn, lines, productsById, cogsMethod]);
+
   const journalTab = (
     <div className="ktra-journal">
+      {missingMethodCostProducts.length > 0 && (
+        <div
+          className="ktra-banner ktra-banner--warn mb-2"
+          role="status"
+          data-testid="cogs-method-missing-cost"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>
+            لا سعر ثابت / لا شراء سابق — ستُقيَّد بالتكلفة الفعلية بلا فرق:{" "}
+            {missingMethodCostProducts.join("، ")}
+          </span>
+        </div>
+      )}
       {journalPreview.errors.length > 0 && (
         <div className="ktra-journal-errs">
           {journalPreview.errors.map((e, i) => (

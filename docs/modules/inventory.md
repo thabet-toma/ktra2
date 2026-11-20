@@ -1050,7 +1050,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
   وأمر الصيانة وتقاريرهما في `after_sales` — كلها كانت تعرض `str(product)`،
   وهي البراند وحده الذي يميّز إخوة الأب الواحد.) `family_name` يُقرأ عبر
   `select_related('family')` على queryset
-  `ProductViewSet` — بلا هذا الجلب صار استعلاماً لكل صفّ.
+  `ProductViewSet` — بلا هذا الجلب صار استعلاماً لكل صفّ. كما يحمل `ProductSerializer` (ومنه `ProductLookupSerializer`) حقل القراءة فقط `cogs_method_unit_cost` (M2-COGS: قيمة `standard_cost` أو `_last_purchase_unit_cost_map` بصيغة Q4 عندما تكون طريقة الشركة في `FIXED_SNAPSHOT_METHODS`، و`None` عند غيابها أو في `fifo` أو بلا سياق شركة — بلا سقوط إلى `avg_cost` في الخادم).
 - **قاعدة مطابقة اسمٍ واحدة لاقتراح «هذا موجود»** (task21): `find_by_normalized_name`
   (فوق `normalize_product_name`) — تطبيعٌ إملائي عربي (تشكيل/تطويل/مسافات/
   ألف-همزة/ألف مقصورة/تاء مربوطة) **بلا مطابقة صوتية** (سامسونج ≠ سامسونغ عمداً).

@@ -5,9 +5,10 @@ from django.db import transaction
 from django.utils import timezone
 from core.api_defaults import CountedQuantityField, TenantScopedPrimaryKeyRelatedField
 from core.user_roles import user_display_name
+from .cogs_method import FIXED_SNAPSHOT_METHODS
 from .fifo import Q4
 from .models import (
-    COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD,
+    COGS_METHOD_STANDARD,
     ProductCategory, ProductFamily, Product, ProductPriceTier,
     ProductStorageLocation, UnitOfMeasure, StockMovement, SupplierProduct,
     Warehouse, WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
@@ -310,6 +311,18 @@ def _last_purchase_unit_cost_map(context) -> dict:
     return context['_last_purchase_unit_cost_map']
 
 
+def _fixed_method_unit_cost(obj, context, method) -> str | None:
+    if method not in FIXED_SNAPSHOT_METHODS:
+        return None
+    if method == COGS_METHOD_STANDARD:
+        val = obj.standard_cost
+    else:
+        val = _last_purchase_unit_cost_map(context).get(obj.id)
+    if val is None:
+        return None
+    return str(Decimal(str(val)).quantize(Q4))
+
+
 class ProductSerializer(serializers.ModelSerializer):
     category_name = serializers.CharField(source='category.name', read_only=True)
     price_tiers = ProductPriceTierSerializer(many=True, required=False)
@@ -356,6 +369,9 @@ class ProductSerializer(serializers.ModelSerializer):
     # M3-COGS: متوسط تكلفة المخزون من الطبقات المفتوحة (ليس Product.avg_cost) وتكلفة الطريقة المختارة.
     inventory_avg_cost = serializers.SerializerMethodField()
     method_cost = serializers.SerializerMethodField()
+    # M2-COGS: التكلفة المتوقَّعة للطريقة على مستوى المنتقي (مرآة `_loss_lines` —
+    # بلا سقوط إلى `avg_cost` هنا، لأن الواجهة تسقط إليه وتحتاج تمييز الغياب).
+    cogs_method_unit_cost = serializers.SerializerMethodField()
     # #233: سببٌ يفرض الرقم التسلسلي على هذا المنتج (نصُّه من مزوِّدٍ خارج
     # هذه الوحدة — عبر `core.hooks.serial_requirements` لا
     # استيرادٍ مباشر) — `None` حين لا فرض. نداءٌ واحد للصفحة كلّها
@@ -408,7 +424,7 @@ class ProductSerializer(serializers.ModelSerializer):
             # مستقلاً يُعرض خلف تفاصيل الصفّ.
             'last_purchase_price',
             'indicative_purchase_price', 'indicative_purchase_price_source',
-            'inventory_avg_cost', 'method_cost',
+            'inventory_avg_cost', 'method_cost', 'cogs_method_unit_cost',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
             # C2: عددُ براندات الأب — لا على عقد `view=lookup` (القائمة أدناه صريحة).
@@ -532,16 +548,14 @@ class ProductSerializer(serializers.ModelSerializer):
         method = _tenant_cogs_method_cached(self.context)
         if not method:
             return None
-        if method == COGS_METHOD_STANDARD:
-            if obj.standard_cost is not None:
-                return str(Decimal(str(obj.standard_cost)).quantize(Q4))
-            return self.get_inventory_avg_cost(obj)
-        if method == COGS_METHOD_LAST_PURCHASE:
-            val = _last_purchase_unit_cost_map(self.context).get(obj.id)
-            if val is not None:
-                return str(Decimal(str(val)).quantize(Q4))
-            return self.get_inventory_avg_cost(obj)
+        fixed = _fixed_method_unit_cost(obj, self.context, method)
+        if fixed is not None:
+            return fixed
         return self.get_inventory_avg_cost(obj)
+
+    def get_cogs_method_unit_cost(self, obj):
+        method = _tenant_cogs_method_cached(self.context)
+        return _fixed_method_unit_cost(obj, self.context, method)
 
     def get_serial_required_by(self, obj):
         row = self.context.get('serial_requirement_map')
@@ -818,7 +832,7 @@ class ProductLookupSerializer(ProductSerializer):
             # نصّان قصيران — والحمولة تُقاس على 1490 منتجاً، فأي حقل ثالث يُبرَّر.
             'stock_status', 'group_key',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
-            'avg_cost', 'sale_price', 'is_service', 'is_serialized',
+            'avg_cost', 'cogs_method_unit_cost', 'sale_price', 'is_service', 'is_serialized',
             # #233: سببُ فرض الرقم التسلسلي — عمود «الأرقام» في محرِّري البيع
             # والشراء يظهر لهذا البند حتى إن كان نمط الشركة `off`.
             'serial_required_by',

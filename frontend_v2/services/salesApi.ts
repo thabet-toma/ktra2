@@ -11,6 +11,7 @@ import {
 import type { PagedList } from "./restApi";
 import type { SerialEntryMode } from "../types/inventory";
 import type { ProductPriceColumn } from "../utils/productPriceColumn";
+import type { CogsCostMethod } from "../utils/cogsCostMethod";
 import type { NoteTarget } from "../utils/voucherAllocation";
 import type { CustomerApprovalStatus } from "../utils/customerApproval";
 
@@ -1030,6 +1031,12 @@ export type SalesSettings = {
   serial_entry_mode: SerialEntryMode;
   /** M3-COGS: الرقم الأساسي المعروض في عمود السعر بجدول المنتجات. */
   product_price_column: ProductPriceColumn;
+  /** M2-COGS: طريقة احتساب تكلفة المبيعات (fifo | standard | last_purchase؛ avco مخفيّ حتى M5). */
+  cogs_cost_method?: CogsCostMethod | null;
+  /** M2-COGS: حساب فروقات تكلفة المبيعات (إلزامي لـ standard / last_purchase). */
+  cost_variance_account?: number | null;
+  /** M2-COGS: اسم حساب فروقات التكلفة (قراءة فقط من الخادم). */
+  cost_variance_account_name?: string | null;
   default_shipping_origin: string;
   default_shipping_destination: string;
   /** تسمية مستند التسليم المرتبط بفاتورة (يحرّرها المستخدم). */
