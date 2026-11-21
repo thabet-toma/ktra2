@@ -1,9 +1,9 @@
-"""توحيد تكلفة الاستيراد مع نموذج «تكلفة المنتجات» (تذكير task23).
+"""متوسط تكلفة الاستيراد (`Product.avg_cost`) مشتقٌّ من طبقات FIFO المفتوحة فقط.
 
-استلام الشحنة (receive_shipment_stock) وترحيل الفاتورة وإلغاء ترحيل الشحنة
-يجب أن تعيد ضبط avg_cost بالمتوسط المرجّح لفواتير الشراء المرحّلة (النموذج
-الدوري، الافتراضي) بأفضلية landed cost — لا بالمتوسط المتحرك الذي ينحرف مع
-المخزون السالب (بيع قبل وصول الشحنة ⇒ 3800÷13 نمط بلاغ المالك).
+استلام الشحنة (`receive_shipment_stock`) وإلغاء ترحيلها يعكسان طبقات FIFO المفتوحة:
+- عند وجود طبقات مفتوحة (بما فيها بعد تسوية طبقة مؤقتة سالبة) يساوي `avg_cost`
+  متوسط الطبقات المفتوحة (`derived_avg_cost`).
+- عند إفراغ المخزون إلى صفر (مثل إلغاء الترحيل) يصبح `avg_cost` صفراً.
 """
 from decimal import Decimal
 
@@ -69,9 +69,9 @@ class ImportCostModelTest(APITestCase):
             landed_line_total_ils=D(landed_total))
         return deal, shipment, inv
 
-    def test_shipment_receive_uses_purchase_cost_model_not_moving_wac(self):
+    def test_shipment_receive_sets_avg_cost_to_open_layers_not_moving_wac(self):
         """بيع قبل وصول الشحنة (رصيد سالب) ثم استلام — يجب أن يثبت avg_cost على
-        متوسط الفواتير المرحّلة (landed 600) لا على WAC المنحرف (6000÷5=1200)."""
+        متوسط الطبقات المفتوحة (landed 600) لا على WAC المنحرف (6000÷5=1200)."""
         # بيع 5 قبل الشراء ⇒ رصيد −5 بتكلفة 0 (الانحراف الكلاسيكي)
         record_stock_movement(
             product=self.product, movement_type="OUT", quantity=D("5"),
@@ -86,24 +86,22 @@ class ImportCostModelTest(APITestCase):
 
         self.product.refresh_from_db()
         self.assertEqual(self.product.quantity_on_hand, D("5.0000"))
-        # النموذج الدوري: 6000 ÷ 10 = 600 — وليس 6000 ÷ 5 = 1200
+        # متوسط الطبقات المفتوحة (5 متبقية @ 600) = 600 — وليس 6000 ÷ 5 = 1200
         self.assertEqual(self.product.avg_cost, D("600.0000"))
 
-    def test_shipment_receive_without_posted_invoice_keeps_wac(self):
-        """لا فاتورة مرحّلة ⇒ set_avg_cost_from_purchases يترك ما بناه WAC
-        (invoice_count=0) — لا تصفير خاطئ."""
+    def test_shipment_receive_without_posted_invoice_sets_avg_cost_from_layer(self):
+        """لا فاتورة مرحّلة ⇒ تبقى تكلفة الطبقة المفتوحة من حركة الاستلام (600)."""
         _, shipment, inv = self._make_flow(invoice_posted=False)
         receive_shipment_stock(shipment)
         self.product.refresh_from_db()
-        # WAC من حركة الاستلام (10 @ 600 على رصيد 0) = 600
+        # متوسط الطبقة المفتوحة (10 @ 600 على رصيد 0) = 600
         self.assertEqual(self.product.avg_cost, D("600.0000"))
 
-    def test_shipment_unpost_recomputes_from_remaining_invoices(self):
-        """إلغاء ترحيل الشحنة يعكس المخزون ويعيد ضبط avg_cost من الفواتير
-        المرحّلة المتبقية (الفاتورة ما زالت مرحّلة ⇒ 600)."""
+    def test_shipment_unpost_zeros_avg_cost_when_no_open_layers(self):
+        """إلغاء ترحيل الشحنة يعكس المخزون ويصفّر avg_cost عند غياب طبقات مفتوحة (qoh=0)."""
         _, shipment, _ = self._make_flow()
         receive_shipment_stock(shipment)
-        # شوّه المتوسط عمداً لنتأكد أن unpost يعيده من النموذج
+        # شوّه المتوسط عمداً لنتأكد أن unpost يعيده لمتوسط الطبقات المفتوحة (صفر عند qoh=0)
         Product.objects.filter(pk=self.product.pk).update(avg_cost=D("999"))
 
         self.client.force_authenticate(user=self.user)
@@ -116,4 +114,4 @@ class ImportCostModelTest(APITestCase):
             reference_type="SHIPMENT", reference_id=shipment.pk).exists())
         self.product.refresh_from_db()
         self.assertEqual(self.product.quantity_on_hand, D("0.0000"))
-        self.assertEqual(self.product.avg_cost, D("600.0000"))
+        self.assertEqual(self.product.avg_cost, D("0.0000"))

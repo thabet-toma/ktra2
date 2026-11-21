@@ -1973,17 +1973,6 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 self._auto_settle_cash_purchase(
                     invoice, settle_amount=supplier_credit, request=request,
                 )
-
-                # توحيد التكلفة (تذكير task23): بعد الترحيل تدخل الفاتورة نموذج
-                # «تكلفة المنتجات» (product_cost_breakdown يقدّم landed cost) —
-                # يغطي المحلية (GR/IR) والدولية معاً؛ شركات المتوسط المتحرك
-                # تُتخطّى مركزياً داخل apply_purchase_cost_model.
-                from inventory.services import apply_purchase_cost_model
-                _seen_products = set()
-                for it in invoice.items.select_related('product'):
-                    if it.product_id and not it.expense_account_id and it.product_id not in _seen_products:
-                        _seen_products.add(it.product_id)
-                        apply_purchase_cost_model(it.product)
         except (ValidationError, DjangoValidationError, IntegrityError) as e:
             msg = e.message if hasattr(e, 'message') else str(e)
             return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -2382,14 +2371,6 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 # ليست من الفاتورة فلم تُعكَس — تبقى مستلَمة.
                 from logistics.services import sync_import_receipt_from_shipment_stock
                 sync_import_receipt_from_shipment_stock(invoice)
-                # أعد ضبط avg_cost حسب نموذج التكلفة: الدوري يعيده من المشتريات
-                # المتبقية؛ والمتوسط المتحرك يترك ما أعاده _recompute_product_stock.
-                from inventory.services import apply_purchase_cost_model
-                seen = set()
-                for it in invoice.items.select_related('product'):
-                    if it.product_id and it.product_id not in seen:
-                        seen.add(it.product_id)
-                        apply_purchase_cost_model(it.product)
         except Exception as e:
             # ValidationError (حارس الاعتمادية مثلاً) يحمل رسالة نظيفة في .messages.
             err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)

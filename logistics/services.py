@@ -2955,19 +2955,6 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
             receipt=existing_receipt,
         )
 
-        # نموذج «تكلفة المنتجات»: اجعل avg_cost المتوسط المرجّح للمشتريات المرحّلة
-        # (مصدر الحقيقة الجديد) كي يقرأ ترحيل COGS عند البيع القيمة الصحيحة.
-        if invoice.is_posted:
-            # النموذج الدوري يَضبط avg_cost من كل المشتريات؛ أما شركات المتوسط
-            # المرجّح المتحرك فيُترك WAC الذي بناه record_stock_movement (تكلفة
-            # لحظة البيع) كما هو. القرار مركزي في apply_purchase_cost_model.
-            from inventory.services import apply_purchase_cost_model
-            seen = set()
-            for it in product_items:
-                if it.product_id and it.product_id not in seen:
-                    seen.add(it.product_id)
-                    apply_purchase_cost_model(it.product)
-
     logger.info(
         "Purchase invoice #%s received: %d movement(s), receipt_status=%s, journal=%s, receipt=%s",
         invoice.id, len(movements), invoice.receipt_status,
@@ -2994,7 +2981,7 @@ def create_standalone_goods_receipt(
     """
     import datetime
     from inventory.models import Warehouse
-    from inventory.services import record_stock_movement, apply_purchase_cost_model
+    from inventory.services import record_stock_movement
     from accounting.services import post_journal
     from inventory.models import Product
 
@@ -3111,9 +3098,6 @@ def create_standalone_goods_receipt(
             supplier_ref=supplier_ref, journal=journal, receipt=doc,
         )
 
-        for p in planned:
-            apply_purchase_cost_model(p['product'])
-
     logger.info(
         'Standalone goods receipt %s: %d line(s), value=%s, journal=%s',
         doc.receipt_number, len(planned), total_value, journal.id if journal else None,
@@ -3136,7 +3120,6 @@ def void_goods_receipt(receipt, *, user=None):
         _recompute_product_stock,
         _reverse_provisional_reconciliations,
         _unlayered_inbound_quantities,
-        apply_purchase_cost_model,
     )
     from .models import PurchaseInvoice
 
@@ -3203,7 +3186,6 @@ def void_goods_receipt(receipt, *, user=None):
 
         for product in products.values():
             _recompute_product_stock(product, unlayered_inbound=unlayered_inbound.get(product.pk))
-            apply_purchase_cost_model(product)
 
         if invoice is not None:
             product_items = [it for it in invoice.items.all() if it.product_id]

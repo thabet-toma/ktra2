@@ -18,7 +18,7 @@ from inventory.models import (
     WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
 )
 from inventory.services import (
-    post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
+    post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake, record_stock_movement,
 )
 from tenants.models import Tenant, TenantBook, UserCompanyMembership
 from tenants.services import create_company
@@ -666,6 +666,61 @@ class StocktakeApiSecurityTest(APITestCase):
         self.product.refresh_from_db()
         self.assertEqual(self.product.quantity_on_hand, Decimal("100"))
         self.assertFalse(StockMovement.objects.filter(reference_type="STOCKTAKE").exists())
+
+    def test_m0_t3_stocktake_shortage_journal_uses_fifo_movement_total_cost(self):
+        """T3: عجز جرد على طبقات 5@10 ثم 5@20 (avg 15)، عدّ 5 ⇒ دائن المخزون = total_cost لحركة ADJUST_OUT = 50.00."""
+        p = Product.objects.create(
+            tenant=self.tenant, sku="SKT-M0-T3", name_ar="جرد عجز M0", category=self.cat,
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+        record_stock_movement(
+            product=p, movement_type="IN", quantity=Decimal("5"), unit_cost=Decimal("10"),
+            movement_date="2026-07-01", tenant=self.tenant)
+        p.refresh_from_db()
+        record_stock_movement(
+            product=p, movement_type="IN", quantity=Decimal("5"), unit_cost=Decimal("20"),
+            movement_date="2026-07-02", tenant=self.tenant)
+        p.refresh_from_db()
+        self.assertEqual(p.avg_cost, Decimal("15.0000"))
+
+        s = Stocktake.objects.create(tenant=self.tenant, stocktake_date="2026-07-03")
+        StocktakeLine.objects.create(stocktake=s, product=p, counted_quantity=Decimal("5"))
+        post_stocktake(s)
+
+        mv = StockMovement.objects.get(reference_type="STOCKTAKE", reference_id=s.id, product=p)
+        self.assertEqual(mv.movement_type, "ADJUST_OUT")
+        self.assertEqual(mv.total_cost, Decimal("50.00"))
+        s.refresh_from_db()
+        inv_line = JournalLine.objects.get(journal=s.journal, account=self.inv_acct)
+        self.assertEqual(inv_line.credit, Decimal("50.00"))
+
+    def test_m0_t4_stocktake_surplus_at_zero_qoh_uses_last_layer_unit_cost(self):
+        """T4: فائض جرد عند رصيد 0 وآخر طبقة مستنفدة بـ12، عدّ 3 ⇒ ADJUST_IN بـ12 ومدين المخزون 36.00."""
+        p = Product.objects.create(
+            tenant=self.tenant, sku="SKT-M0-T4", name_ar="جرد فائض M0", category=self.cat,
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"))
+        record_stock_movement(
+            product=p, movement_type="IN", quantity=Decimal("4"), unit_cost=Decimal("12"),
+            movement_date="2026-07-01", tenant=self.tenant)
+        p.refresh_from_db()
+        record_stock_movement(
+            product=p, movement_type="OUT", quantity=Decimal("4"),
+            movement_date="2026-07-02", tenant=self.tenant)
+        p.refresh_from_db()
+        self.assertEqual(p.quantity_on_hand, Decimal("0.0000"))
+        self.assertEqual(p.avg_cost, Decimal("0.0000"))
+
+        s = Stocktake.objects.create(tenant=self.tenant, stocktake_date="2026-07-03")
+        StocktakeLine.objects.create(stocktake=s, product=p, counted_quantity=Decimal("3"))
+        post_stocktake(s)
+
+        mv = StockMovement.objects.get(reference_type="STOCKTAKE", reference_id=s.id, product=p)
+        self.assertEqual(mv.movement_type, "ADJUST_IN")
+        self.assertEqual(mv.unit_cost, Decimal("12.0000"))
+        self.assertEqual(mv.total_cost, Decimal("36.00"))
+        s.refresh_from_db()
+        self.assertIsNotNone(s.journal)
+        inv_line = JournalLine.objects.get(journal=s.journal, account=self.inv_acct)
+        self.assertEqual(inv_line.debit, Decimal("36.00"))
 
 
 class WarehouseTransferApiSecurityTest(APITestCase):

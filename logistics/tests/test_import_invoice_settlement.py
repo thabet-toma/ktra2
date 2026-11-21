@@ -786,7 +786,7 @@ class ImportInvoiceSettlementTest(APITestCase):
         return sum((m.quantity * m.unit_cost for m in moves), D("0")).quantize(Q2)
 
     def _stock_value_at_avg(self, inv):
-        """قيمة المخزون كما تقرؤها التقارير في النموذج الدوري: الكمية × avg_cost."""
+        """قيمة المخزون كما تقرؤها التقارير: الكمية × avg_cost (متوسط الطبقات المفتوحة)."""
         total = D("0")
         for it in inv.items.select_related("product"):
             it.product.refresh_from_db()
@@ -801,7 +801,7 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(grn, (landed + D("35")).quantize(Q2))
         # الثابت: Σ(كمية × تكلفة وحدة الحركة) = مدين المخزون في قيد الاستلام بالقرش.
         self.assertEqual(self._receipt_value(inv), grn)
-        # والمتوسط (النموذج الدوري — الافتراضي) يحمل العمولة: كان السعرَ المستورد وحده.
+        # ومتوسط الطبقات المفتوحة يحمل العمولة: كان السعرَ المستورد وحده.
         self.assertEqual(self._stock_value_at_avg(inv), grn)
 
     def test_every_import_fee_enters_unit_cost(self):
@@ -886,8 +886,12 @@ class ImportInvoiceSettlementTest(APITestCase):
         call_command("reconcile_import_unit_costs", "--tenant", str(self.tenant.pk), stdout=out)
         self.assertIn(inv.invoice_number, out.getvalue())
         self.assertIn("35.00", out.getvalue())
+        self.assertIn("  SET-GIFT: الآن 0.0000 · من الطبقات المفتوحة 0.0000 (unchanged)", out.getvalue())
+        out = StringIO()
         call_command("reconcile_import_unit_costs", "--tenant", str(self.tenant.pk), "--apply",
-                     stdout=StringIO())
+                     stdout=out)
+        self.assertIn("  SET-GIFT: 0.0000 → 0.0000 (unchanged)", out.getvalue())
+        self.assertIn("ضُبط متوسط 1 صنف — بلا قيد.", out.getvalue())
         self.assertLessEqual(abs(self._stock_value_at_avg(inv) - grn), D("0.01"))
 
     def test_reconcile_command_leaves_fifo_sales_alone(self):

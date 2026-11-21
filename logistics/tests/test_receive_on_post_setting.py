@@ -12,7 +12,8 @@ from rest_framework.test import APITestCase
 
 from accounting.models import Account, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year
-from inventory.models import Product, StockMovement, Warehouse
+from inventory.models import Product, StockLayer, StockMovement, Warehouse
+from inventory.services import record_stock_movement
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
 from logistics.services import GR_IR_ACCOUNT_CODE
 from logistics.services import get_or_create_purchase_settings
@@ -464,3 +465,62 @@ class ReceiveOnPostSettingTest(APITestCase):
         assert not JournalHeader.objects.filter(
             tenant=self.tenant, reference_id=inv.pk,
             reference_type__in=["PURCHASE_INVOICE", "PURCHASE_GRN"]).exists()
+
+    def test_m0_t1_avg_cost_is_open_layer_average_and_negative_out_uses_it(self):
+        """T1: شراء 10@10، بيع 10، شراء 10@20 (ترحيل+استلام) ⇒ avg_cost=20، ثم صرف 15 بالسالب ⇒ 300 وطبقة مؤقتة بـ20."""
+        inv1, _ = self._make_local_invoice(qty="10", price="10")
+        r1 = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv1.pk}/post-to-accounting/", {},
+            format="json", **self._auth())
+        assert r1.status_code == 201, r1.content
+
+        self.product.refresh_from_db()
+        record_stock_movement(
+            product=self.product, movement_type="OUT", quantity=Decimal("10"),
+            reference_type="SALE", reference_id=7001,
+            movement_date="2026-06-12", tenant=self.tenant)
+
+        inv2, _ = self._make_local_invoice(qty="10", price="20")
+        r2 = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv2.pk}/post-to-accounting/", {},
+            format="json", **self._auth())
+        assert r2.status_code == 201, r2.content
+
+        self.product.refresh_from_db()
+        assert self.product.quantity_on_hand == Decimal("10.0000")
+        assert self.product.avg_cost == Decimal("20.0000")
+
+        out_mv = record_stock_movement(
+            product=self.product, movement_type="OUT", quantity=Decimal("15"),
+            reference_type="SALE", reference_id=7002,
+            movement_date="2026-06-15", tenant=self.tenant)
+        assert out_mv.total_cost == Decimal("300.00")
+        prov = StockLayer.objects.get(source_movement=out_mv, is_provisional=True)
+        assert prov.unit_cost == Decimal("20.0000")
+
+    def test_m0_t2_posting_without_receive_at_zero_qoh_leaves_avg_cost_unchanged(self):
+        """T2: ترحيل فاتورة شراء مع receive_on_post=False عند رصيد 0 يترك avg_cost=0 دون تغيير."""
+        inv1, _ = self._make_local_invoice(qty="10", price="10")
+        r1 = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv1.pk}/post-to-accounting/", {},
+            format="json", **self._auth())
+        assert r1.status_code == 201, r1.content
+
+        self.product.refresh_from_db()
+        record_stock_movement(
+            product=self.product, movement_type="OUT", quantity=Decimal("10"),
+            reference_type="SALE", reference_id=7003,
+            movement_date="2026-06-12", tenant=self.tenant)
+        self.product.refresh_from_db()
+        assert self.product.quantity_on_hand == Decimal("0.0000")
+        assert self.product.avg_cost == Decimal("0.0000")
+
+        self._set_receive_on_post(False)
+        inv2, _ = self._make_local_invoice(qty="10", price="20")
+        r2 = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv2.pk}/post-to-accounting/", {},
+            format="json", **self._auth())
+        assert r2.status_code == 201, r2.content
+
+        self.product.refresh_from_db()
+        assert self.product.avg_cost == Decimal("0.0000")

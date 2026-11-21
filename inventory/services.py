@@ -756,9 +756,10 @@ def _last_layer_unit_cost(*, tenant_id: int, product_id: int) -> Decimal:
     """آخر كلفة وحدة معروفة لمنتج — كلفة وحدة آخر طبقةٍ أُنشئت له (بصرف النظر
     عن نفادها)، أو صفر إن لم توجد طبقةٌ إطلاقاً.
 
-    تُستعمل حصراً لتسعير الطبقة المؤقّتة (`is_provisional`) عند نفاد الطبقات
-    المفتوحة و`avg_cost` الحالي صفرٌ معاً — ترتيب «آخر كلفة معروفة» الكامل في
-    `record_stock_movement`: `avg_before` إن كان > 0، وإلا هذه الدالة، وإلا صفر.
+    تُستعمل في موضعين عندما يكون `avg_cost` الحالي صفراً:
+    1) تسعير الطبقة المؤقّتة (`is_provisional`) في `record_stock_movement` عند نفاد
+       الطبقات المفتوحة و`avg_cost` صفر معاً (`avg_before` > 0، وإلا هذه الدالة، وإلا صفر).
+    2) تسعير حركة فائض الجرد (`ADJUST_IN`) في `post_stocktake` عندما يكون `avg_cost` صفراً.
     """
     last = (
         StockLayer.objects.filter(tenant_id=tenant_id, product_id=product_id)
@@ -1613,16 +1614,6 @@ def receive_shipment_stock(shipment, movement_date=None):
             )
             created.append(mv)
 
-    # توحيد تكلفة الاستيراد مع نموذج «تكلفة المنتجات» (تذكير task23):
-    # بعد استلام الشحنة يُعاد ضبط avg_cost بالمتوسط المرجّح للمشتريات المرحّلة
-    # (يشمل landed cost لأن product_cost_breakdown يقدّم حقول landed) — القرار
-    # بين الدوري/المتحرك مركزي في apply_purchase_cost_model.
-    seen_products = set()
-    for mv in created:
-        if mv.product_id and mv.product_id not in seen_products:
-            seen_products.add(mv.product_id)
-            apply_purchase_cost_model(mv.product)
-
     return created
 
 
@@ -2413,41 +2404,55 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
     }
 
 
-def set_avg_cost_from_purchases(product) -> Decimal:
-    """يضبط `avg_cost` للمنتج من فواتير الشراء المرحّلة بنموذج «تكلفة المنتجات»
-    (متوسط مرجّح بالكمية). يُستدعى بعد استلام/ترحيل فاتورة شراء محلية كي يصبح
-    avg_cost مصدر الحقيقة للنموذج الجديد بدل WAC المتحرك المنحرف — فيقرأ ترحيل
-    COGS عند البيع القيمة الصحيحة تلقائياً. لا فواتير ⇒ يُترك avg_cost كما هو."""
-    bd = product_cost_breakdown(tenant_id=product.tenant_id, product_id=product.id)
-    if bd['invoice_count'] == 0:
-        return Decimal(str(product.avg_cost or 0))
-    avg = Decimal(bd['average_cost'])
-    with transaction.atomic():
-        prod = Product.objects.select_for_update().get(pk=product.pk)
-        prod.avg_cost = avg
-        prod.save(update_fields=['avg_cost'])
-    logger.info("set_avg_cost_from_purchases product=%s avg=%s", product.pk, avg)
-    return avg
+def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
+    """يُزامن `Product.avg_cost` مع متوسّط طبقات FIFO المفتوحة (`derived_avg_cost`).
 
+    تحت `transaction.atomic()` + قفل `select_for_update` على المنتج:
+    - إن كان `quantity_on_hand <= 0` أو طابق مجموع `remaining_qty` للطبقات
+      المفتوحة `quantity_on_hand`: الهدف = `fifo.derived_avg_cost` مقرَّباً إلى
+      4 منازل عشرية (صفرٌ بلا طبقات مفتوحة). الحالة `'synced'` أو `'unchanged'`.
+    - أمّا رصيدٌ موجبٌ غير مغطّى بالكامل بالطبقات (بياناتٌ قديمة بلا طبقات)
+      فحالته `'skipped_uncovered'` ولا يُكتَب شيءٌ (لأن `backfill_opening_layer`
+      يحتاج القيمة السابقة).
 
-def apply_purchase_cost_model(product) -> None:
-    """يطبّق نموذج التكلفة حسب إعداد الشركة بعد استلام/تراجع فاتورة شراء.
-
-    - الشركة على **المتوسط المرجّح المتحرك** (`SalesSettings.use_moving_average_cost`)
-      ⇒ لا نفعل شيئاً: `avg_cost` الذي ضبطه `record_stock_movement` (WAC المتحرك،
-      أي تكلفة لحظة البيع) هو مصدر الحقيقة، فلا يُدهَس.
-    - غير ذلك ⇒ النموذج الدوري: `set_avg_cost_from_purchases` (متوسط كل المشتريات).
-
-    مصدر حقيقة واحد لقرار طريقة التكلفة، يستدعيه كل مسارات الشراء (استلام/تراجع).
+    يكتب `avg_cost` فقط عند `apply=True`.
     """
-    from sales.models import SalesSettings
-    ss = (
-        SalesSettings.objects.filter(tenant_id=product.tenant_id)
-        .only('use_moving_average_cost').first()
-    )
-    if ss and ss.use_moving_average_cost:
-        return
-    set_avg_cost_from_purchases(product)
+    q4 = Decimal('0.0001')
+    with transaction.atomic():
+        prod = Product.objects.select_for_update().get(
+            pk=product.pk, tenant_id=product.tenant_id,
+        )
+        before = Decimal(str(prod.avg_cost or 0)).quantize(q4)
+        qoh = Decimal(str(prod.quantity_on_hand or 0)).quantize(q4)
+        open_qty = fifo.open_layers_quantity(
+            tenant_id=prod.tenant_id, product_ids=[prod.pk],
+        ).get(prod.pk, Decimal('0')).quantize(q4)
+        if qoh > 0 and open_qty != qoh:
+            return {
+                'product_id': prod.pk,
+                'before': before,
+                'after': before,
+                'status': 'skipped_uncovered',
+            }
+        target = fifo.derived_avg_cost(
+            tenant_id=prod.tenant_id, product_id=prod.pk,
+        ).quantize(q4)
+        if target == before:
+            return {
+                'product_id': prod.pk,
+                'before': before,
+                'after': before,
+                'status': 'unchanged',
+            }
+        if apply:
+            prod.avg_cost = target
+            prod.save(update_fields=['avg_cost'])
+        return {
+            'product_id': prod.pk,
+            'before': before,
+            'after': target,
+            'status': 'synced',
+        }
 
 
 def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:
@@ -3077,29 +3082,35 @@ def post_stocktake(stocktake, user=None, uncounted_as_zero=False):
                 'system_quantity', 'variance'])
             if variance == 0:
                 continue
-            avg = Decimal(str(prod.avg_cost))
-            value = (abs(variance) * avg).quantize(Decimal('0.01'))
+            avg = Decimal(str(prod.avg_cost or 0))
             inv_acct = _resolve_line_account(prod, 'inventory', tenant_id=locked.tenant_id)
             cogs_acct = _resolve_line_account(prod, 'cogs', tenant_id=locked.tenant_id)
             if variance > 0:
-                # فائض: زيادة مخزون
-                record_stock_movement(
-                    product=prod, movement_type='ADJUST_IN', quantity=variance, unit_cost=avg,
+                # فائض: زيادة مخزون — `avg_cost` إن كان موجباً، وإلا كلفة آخر طبقة، وإلا صفر.
+                surplus_unit_cost = (
+                    avg if avg > 0
+                    else _last_layer_unit_cost(tenant_id=locked.tenant_id, product_id=prod.pk)
+                )
+                mv = record_stock_movement(
+                    product=prod, movement_type='ADJUST_IN', quantity=variance,
+                    unit_cost=surplus_unit_cost,
                     reference_type='STOCKTAKE', reference_id=locked.id,
                     movement_date=locked.stocktake_date, tenant=locked.tenant,
                     warehouse=locked.warehouse, notes="فائض جرد",
                 )
+                value = Decimal(str(mv.total_cost or 0)).quantize(Decimal('0.01'))
                 if value > 0:
                     _add(debit_by_acct, inv_acct, value)
                     _add(credit_by_acct, cogs_acct, value)
             else:
-                # عجز: نقص مخزون
-                record_stock_movement(
+                # عجز: نقص مخزون — قيمة القيد من تكلفة الحركة المستهلكة من طبقات FIFO.
+                mv = record_stock_movement(
                     product=prod, movement_type='ADJUST_OUT', quantity=abs(variance),
                     reference_type='STOCKTAKE', reference_id=locked.id,
                     movement_date=locked.stocktake_date, tenant=locked.tenant,
                     warehouse=locked.warehouse, notes="عجز جرد",
                 )
+                value = Decimal(str(mv.total_cost or 0)).quantize(Decimal('0.01'))
                 if value > 0:
                     _add(debit_by_acct, cogs_acct, value)
                     _add(credit_by_acct, inv_acct, value)

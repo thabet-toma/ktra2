@@ -1,18 +1,16 @@
-"""متوسط تكلفة أصناف الفواتير الدولية المرحّلة = ما دخل المخزون فعلاً — قراءةٌ افتراضاً.
+"""فحص فواتير الاستيراد المرحّلة ومزامنة متوسط تكلفة أصنافها (`Product.avg_cost`) من الطبقات المفتوحة.
 
-كان متوسط «تكلفة المنتجات» (النموذج الدوري، `inventory.services.product_cost_breakdown`)
-يُبنى من `landed_line_total_ils` فيسقط منه عمولات التحويل والرسوم المرسملة، بينما قيد
-الاستلام وحركته وطبقة FIFO تحملها: «الكمية × avg_cost» (تقييم المخزون، حارس البيع
-بخسارة) أقلّ من 1104 بها (INV-0022: 68.04، INV-0023: 136.08). صار المتوسط من قيمة البند
-في المخزون (`logistics.services.posted_goods_line_costs`)؛ والأمر يصلح القائم:
+يعرض لكل فاتورة دولية مرحّلة مدين البضاعة في وسيطها (`open_goods_clearing`)، وقيمة
+حركات استلامها، وقيمتها بالسعر المستورد، والفرق (ما رسمله قيدها فوق السعر
+المستورد من عمولات التحويل والرسوم المرسملة عبر `logistics.services.posted_goods_line_costs`).
+ولكل صنف متأثّر: `avg_cost` الحالي مقابل هدف الطبقات المفتوحة عبر
+`inventory.services.sync_avg_cost_from_layers`:
 
     python manage.py reconcile_import_unit_costs --tenant 1          # قراءة
     python manage.py reconcile_import_unit_costs --tenant 1 --apply  # تصحيح
 
-لكل فاتورة: مدين البضاعة في وسيطها (`open_goods_clearing`)، وقيمة حركات استلامها، وقيمتها
-بالسعر المستورد، والفرق (ما رسمله قيدها فوق السعر المستورد). ولكل صنف: المتوسط قبل وبعد.
-`--apply` يضبط المتوسط بمسار الشراء نفسه (`inventory.services.apply_purchase_cost_model`) —
-بلا قيد ولا كتابة لحركات الاستلام: 1104 يحمل القيمة الصحيحة سلفاً.
+`--apply` يزامن `Product.avg_cost` من الطبقات المفتوحة (`sync_avg_cost_from_layers`) —
+بلا قيد ولا كتابة لحركات الاستلام.
 
 **المبيع لا يحتاج تسوية**: قيد ت.ب.م يُبنى من كلفة حركة البيع (`total_cost`) وهي من طبقة
 FIFO لا من `avg_cost` — فخرجت العمولة من 1104 مع البيع. الأمر يتحقّق من ذلك لكل بيعٍ
@@ -24,7 +22,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from inventory.models import Product, StockLayerConsumption, StockMovement
-from inventory.services import apply_purchase_cost_model, product_cost_breakdown
+from inventory.services import sync_avg_cost_from_layers
 from logistics.models import PurchaseInvoice
 from logistics.services import open_goods_clearing, posted_goods_line_costs
 
@@ -106,19 +104,17 @@ class Command(BaseCommand):
             return
 
         w(self.style.MIGRATE_HEADING("الأصناف: المتوسط (avg_cost)"))
+        synced = 0
         with transaction.atomic():
             for product in Product.objects.filter(tenant_id=tenant_id, pk__in=products).order_by('pk'):
-                before = Decimal(str(product.avg_cost or 0))
+                res = sync_avg_cost_from_layers(product, apply=apply)
+                if res['status'] == 'synced':
+                    synced += 1
                 if apply:
-                    apply_purchase_cost_model(product)
-                    product.refresh_from_db(fields=['avg_cost'])
-                    after = Decimal(str(product.avg_cost or 0))
-                    w(f"  {product.sku}: {before} → {after}")
+                    w(f"  {product.sku}: {res['before']} → {res['after']} ({res['status']})")
                 else:
-                    target = product_cost_breakdown(
-                        tenant_id=tenant_id, product_id=product.pk)['average_cost']
-                    w(f"  {product.sku}: الآن {before} · من مدين البضاعة {target}")
+                    w(f"  {product.sku}: الآن {res['before']} · من الطبقات المفتوحة {res['after']} ({res['status']})")
         if apply:
-            w(self.style.SUCCESS(f"ضُبط متوسط {len(products)} صنف — بلا قيد."))
+            w(self.style.SUCCESS(f"ضُبط متوسط {synced} صنف — بلا قيد."))
         else:
             w("أعد التشغيل بـ --apply لضبط المتوسط (بلا قيد).")

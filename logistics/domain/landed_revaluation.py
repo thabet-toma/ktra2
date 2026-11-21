@@ -341,7 +341,6 @@ def apply(snapshots: list[InvoiceSnapshot], *, adjust_date, user=None) -> list[I
     from accounting.services import post_journal
     from inventory.fifo import derived_avg_cost
     from inventory.models import Product
-    from inventory.services import apply_purchase_cost_model
     from logistics.landed_cost import _import_row_drifted
     from logistics.models import PurchaseInvoice
     from tenants.models import Currency
@@ -397,7 +396,6 @@ def apply(snapshots: list[InvoiceSnapshot], *, adjust_date, user=None) -> list[I
             prod = Product.objects.select_for_update().get(pk=pid, tenant_id=inv.tenant_id)
             prod.avg_cost = derived_avg_cost(tenant_id=inv.tenant_id, product_id=pid)
             prod.save(update_fields=['avg_cost'])
-            apply_purchase_cost_model(prod)
         p.journal_id = journal.pk if journal else None
         logger.info(
             'landed revaluation invoice=%s journal=%s amount=%s buckets=%s',

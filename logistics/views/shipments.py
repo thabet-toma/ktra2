@@ -878,16 +878,6 @@ class LogisticsShipmentViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                     user=request.user,
                     document_label=f"شحنة {shipment.shipment_number}",
                 )
-                # توحيد التكلفة (task23): بعد عكس استلام الشحنة يُعاد ضبط
-                # avg_cost من المشتريات المرحّلة المتبقية (النموذج الدوري)؛
-                # شركات المتوسط المتحرك تُتخطّى مركزياً.
-                from inventory.services import apply_purchase_cost_model
-                _seen_products = set()
-                for deal in shipment.deals.all():
-                    for it in deal.items.select_related('product').filter(is_deleted=False):
-                        if it.product_id and it.product_id not in _seen_products:
-                            _seen_products.add(it.product_id)
-                            apply_purchase_cost_model(it.product)
         except Exception as e:
             err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
             return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)

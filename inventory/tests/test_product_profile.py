@@ -15,7 +15,6 @@ from inventory.services import (
     product_stock_ledger,
     reconcile_product_cogs,
     record_stock_movement,
-    set_avg_cost_from_purchases,
 )
 from accounting.models import JournalHeader
 from core.pricing import last_purchase_prices_base_currency
@@ -181,21 +180,6 @@ def test_cost_breakdown_landed_cost_priority(env):
     assert Decimal(res["average_cost"]) == Decimal("120.0000")
 
 
-def test_set_avg_cost_from_purchases(env):
-    """avg_cost يصبح المتوسط المرجّح للمشتريات المرحّلة (مصدر الحقيقة الجديد)."""
-    tenant, ils, sup, product = env
-    inv = PurchaseInvoice.objects.create(
-        tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
-        invoice_date="2026-06-01", is_posted=True)
-    PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="منتج",
-        quantity=Decimal("40"), unit_price=Decimal("95"), total_price=Decimal("3800"))
-    avg = set_avg_cost_from_purchases(product)
-    assert avg == Decimal("95.0000")
-    product.refresh_from_db()
-    assert product.avg_cost == Decimal("95.0000")
-
-
 def test_reconcile_cogs_fixes_sell_before_buy(env):
     """بيع 27 قبل وصول الشراء يسجّل COGS=0؛ بعد وصول شراء 40 بـ3800 (متوسط 95)
     تُصحَّح تكلفة المبيعات إلى 27×95=2565 ويُرحَّل قيد التسوية، فتصحّ قائمة الدخل."""
@@ -299,7 +283,11 @@ def test_profile_exposes_sale_price_and_margin(env):
     PurchaseInvoiceItem.objects.create(
         invoice=inv, product=product, name="منتج",
         quantity=Decimal("10"), unit_price=Decimal("100"), total_price=Decimal("1000"))
-    set_avg_cost_from_purchases(product)
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"),
+        unit_cost=Decimal("100"), reference_type="PURCHASE_INVOICE",
+        reference_id=inv.id, movement_date="2026-06-01", tenant=tenant)
+    product.refresh_from_db()
     product.sale_price = Decimal("150")
     product.save(update_fields=["sale_price"])
 
