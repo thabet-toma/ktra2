@@ -7,16 +7,14 @@ import pytest
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from inventory.models import Product, StockMovement
+from inventory.models import Product
 from inventory.services import (
     product_cost_breakdown,
     product_linked_invoices,
     product_profile,
     product_stock_ledger,
-    reconcile_product_cogs,
     record_stock_movement,
 )
-from accounting.models import JournalHeader
 from core.pricing import last_purchase_prices_base_currency
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
 from partners.models import Partner
@@ -178,47 +176,6 @@ def test_cost_breakdown_landed_cost_priority(env):
     assert res["invoices"][0]["invoice_cost"] == "1200.00"
     assert res["invoices"][0]["unit_cost"] == "120.0000"
     assert Decimal(res["average_cost"]) == Decimal("120.0000")
-
-
-def test_reconcile_cogs_fixes_sell_before_buy(env):
-    """بيع 27 قبل وصول الشراء يسجّل COGS=0؛ بعد وصول شراء 40 بـ3800 (متوسط 95)
-    تُصحَّح تكلفة المبيعات إلى 27×95=2565 ويُرحَّل قيد التسوية، فتصحّ قائمة الدخل."""
-    tenant, ils, sup, product = env
-    # بيع 27 قبل أي شراء (المخزون السالب مسموح افتراضياً) ⇒ COGS=0، الكمية ‑27
-    record_stock_movement(
-        product=product, movement_type="OUT", quantity=Decimal("27"),
-        reference_type="SALE", reference_id=1,
-        movement_date="2026-06-01", tenant=tenant)
-    out = StockMovement.objects.get(product=product, movement_type="OUT")
-    assert out.total_cost == Decimal("0.00")  # الخلل: تكلفة بيع صفرية
-
-    # وصول فاتورة الشراء: 40 وحدة بإجمالي 3800 ⇒ متوسط 95
-    inv = PurchaseInvoice.objects.create(
-        tenant=tenant, invoice_number="P-1", partner=sup, currency=ils,
-        invoice_date="2026-06-05", is_posted=True)
-    PurchaseInvoiceItem.objects.create(
-        invoice=inv, product=product, name="منتج",
-        quantity=Decimal("40"), unit_price=Decimal("95"), total_price=Decimal("3800"))
-
-    preview = reconcile_product_cogs(tenant_id=tenant.TenantID, product_id=product.id, apply=False)
-    assert Decimal(preview["average_cost"]) == Decimal("95.0000")
-    assert Decimal(preview["new_cogs"]) == Decimal("2565.00")
-    assert Decimal(preview["diff"]) == Decimal("2565.00")
-    assert preview["applied"] is False
-
-    res = reconcile_product_cogs(tenant_id=tenant.TenantID, product_id=product.id, apply=True, user=None)
-    assert res["applied"] is True
-    assert res["journal_id"] is not None
-    out.refresh_from_db()
-    assert out.total_cost == Decimal("2565.00")  # أُعيد تقييم تكلفة البيع
-    product.refresh_from_db()
-    assert product.avg_cost == Decimal("95.0000")
-    j = JournalHeader.objects.get(id=res["journal_id"])
-    assert j.reference_type == "COGS_RECONCILE"
-    # idempotent: تشغيل ثانٍ بلا فرق
-    again = reconcile_product_cogs(tenant_id=tenant.TenantID, product_id=product.id, apply=True)
-    assert Decimal(again["diff"]) == Decimal("0.00")
-    assert again["journal_id"] is None
 
 
 def test_stock_ledger_exposes_party(env):

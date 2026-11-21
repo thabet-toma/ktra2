@@ -230,17 +230,8 @@ class SalesSettings(models.Model):
             "منع الحفظ والترحيل. المسودة لا تحرّك مخزوناً."
         ),
     )
-    # حقلٌ قديم مهجور — لم يعد له قارئ بعد توحيد `Product.avg_cost` على متوسّط
-    # طبقات FIFO المفتوحة (`fifo.derived_avg_cost`) في تذكرة M0.
-    # يُحتفَظ به دون تغيير لتفادي هجرة حذف قبل موافقة المالك.
-    use_moving_average_cost = models.BooleanField(
-        default=False,
-        db_column="UseMovingAverageCost",
-        help_text="مفعّل = متوسط مرجّح متحرك (تكلفة لحظة البيع، مثل الأنظمة الاحترافية)؛ معطّل = متوسط كل فواتير الشراء (النموذج الدوري)",
-    )
     # M1A-COGS / M1B-3a: يقرؤها `inventory/services.py` (`record_stock_movement`) وقت الترحيل لكتابة لقطة تكلفة البيع،
-    # وتعرضها نقطة إعدادات المبيعات (`SalesSettingsViewSet.current`) مع التحقق والتدقيق (والواجهة في M2)؛
-    # و`use_moving_average_cost` أعلاه تبقى مستقلةً ولا تُخلط بها.
+    # وتعرضها نقطة إعدادات المبيعات (`SalesSettingsViewSet.current`) مع التحقق والتدقيق (والواجهة في M2).
     cogs_cost_method = models.CharField(
         max_length=20,
         choices=COGS_METHOD_CHOICES,

@@ -183,7 +183,6 @@ ignore_imports =
     core.reports.* -> accounting.models
     hr.payroll -> accounting.models
     inventory.services -> accounting.models
-    inventory.management.commands.recompute_moving_wac_cogs -> accounting.models
     logistics.accruals -> accounting.models
     logistics.landed_cost -> accounting.models
     logistics.models -> accounting.models
@@ -238,5 +237,3 @@ ignore_imports =
     inventory.services -> sales.models
     inventory.services -> sales.services
     inventory.views -> sales.services
-    inventory.management.commands.backfill_stock -> logistics.models
-    inventory.management.commands.recompute_moving_wac_cogs -> sales.models

@@ -181,7 +181,7 @@
 - **`accountant_portal`**: `services.py:867-1168` (5 مواضع `JournalLine` aggregate)، `readiness.py`، `audit.py` (`AccountingAuditLog`).
 - **`core`**: `reports.py:993,1360,1420,1474,1630,1701,1774` · `dashboard_api.py` · `platform_admin_api.py`.
 - **`hr`**: `payroll.py` (`JournalLine` قراءة؛ الترحيل نفسه عبر `post_journal` — `payroll.py:277,355` ✅).
-- **`inventory`**: `services.py` (`Account` قراءة) · `management/commands/recompute_moving_wac_cogs.py`.
+- **`inventory`**: `services.py` (`Account` قراءة).
 - **`logistics`**: `serializers.py:10,2444` · `landed_cost.py` (`ExchangeRate`) · `services.py:13,884,1409` (قراءة — الترحيل عبر `post_journal`: `services.py:1190,1360,1770` ✅) · `payment_posting_diagnostics.py` · `models.py` (FKs) · `signals.py` (**ميت**) · `views.py:40,45,889` (قراءة + المواضع الكاتبة المذكورة أعلاه) · `management/commands/audit_freight_accruals.py`.
 - **`sales`**: `models.py` (FKs) · `serializers.py` · `services.py:14,201,784,1072,1513,2128,2519,3881` (قراءة `Cheque`/`TaxRate`/`JournalLine`؛ الترحيل عبر `post_journal`: `services.py:1482,1897,2102,2457,2479,3779,3856` ✅) · `views.py` · `management/commands/fix_legacy_cash_partner_tags.py`.
 - **`tenants`**: `services.py` (`Account`, `Currency` — للزرع أعلاه).

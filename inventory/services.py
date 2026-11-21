@@ -14,7 +14,7 @@ from django.core.exceptions import ValidationError
 
 from .cogs_method import (
     FIXED_SNAPSHOT_METHODS, apply_sale_cogs_snapshot, build_cogs_adjustment_lines,
-    cost_variance_account_id, is_sale_issue, sync_fifo_snapshot,
+    cost_variance_account_id, is_sale_issue,
 )
 from .models import (
     Product, ProductFamily, ProductMerge, ProductStorageLocation, StockLayer,
@@ -2453,99 +2453,6 @@ def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
             'after': target,
             'status': 'synced',
         }
-
-
-def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = False, user=None) -> dict:
-    """يصحّح تكلفة البضاعة المباعة وقائمة الدخل لمنتج وفق نموذج «تكلفة المنتجات»
-    (متوسط مرجّح بالكمية، periodic — يتحقق: COGS + مخزون آخر المدة = إجمالي المشتريات).
-
-    يعيد تقييم حركات البيع (movement_type=OUT, reference_type=SALE) بالمتوسط الجديد
-    (فيصبح تقرير أرباح الفواتير صحيحاً لأنه يقرأ total_cost للحركة)، ويُرحّل **قيد
-    تسوية واحداً** بفرق التكلفة: حصة الحركات ذات اللقطة الثابتة (`standard`/`last_purchase`)
-    تذهب إلى حساب فروقات تكلفة المبيعات، والباقي إلى ت.ب.م، والمخزون بالمجموع الكلّي
-    فتصبح قائمة الدخل صحيحة. يعالج حالة البيع قبل وصول الشراء (COGS=0).
-
-    apply=False ⇒ معاينة فقط (لا تعديل). idempotent: تشغيل ثانٍ لا فرق فيه ⇒ لا قيد.
-    """
-    from accounting.services import post_journal
-    import datetime
-
-    bd = product_cost_breakdown(tenant_id=tenant_id, product_id=product_id)
-    avg = Decimal(bd['average_cost'])
-    out_moves = list(StockMovement.objects.filter(
-        tenant_id=tenant_id, product_id=product_id,
-        movement_type='OUT', reference_type='SALE',
-    ))
-    old_cogs = sum((Decimal(str(m.total_cost or 0)) for m in out_moves), Decimal('0')).quantize(Decimal('0.01'))
-    new_cogs = sum((Decimal(str(m.quantity or 0)) * avg for m in out_moves), Decimal('0')).quantize(Decimal('0.01'))
-    diff = (new_cogs - old_cogs).quantize(Decimal('0.01'))
-    variance_diff = sum(
-        (
-            (Decimal(str(m.quantity or 0)) * avg).quantize(Decimal('0.01')) - Decimal(str(m.total_cost or 0))
-            for m in out_moves if m.cogs_method in FIXED_SNAPSHOT_METHODS
-        ),
-        Decimal('0'),
-    ).quantize(Decimal('0.01'))
-    cogs_diff = diff - variance_diff
-
-    result = {
-        'product_id': product_id, 'average_cost': str(avg),
-        'sold_moves': len(out_moves), 'old_cogs': str(old_cogs),
-        'new_cogs': str(new_cogs), 'diff': str(diff),
-        'variance_diff': str(variance_diff),
-        'applied': False, 'journal_id': None,
-    }
-    if not apply or bd['invoice_count'] == 0:
-        return result
-
-    p = Product.objects.get(id=product_id, tenant_id=tenant_id)
-    with transaction.atomic():
-        variance_acct_id = cost_variance_account_id(tenant_id) if variance_diff else None
-        for m in out_moves:
-            q = Decimal(str(m.quantity or 0))
-            m.unit_cost = avg
-            m.total_cost = (q * avg).quantize(Decimal('0.01'))
-            m.avg_cost_after = avg
-            fields = ['unit_cost', 'total_cost', 'avg_cost_after']
-            if sync_fifo_snapshot(m):
-                fields.append('cogs_cost')
-            m.save(update_fields=fields)
-        p.avg_cost = avg
-        p.save(update_fields=['avg_cost'])
-        journal = None
-        if diff or variance_diff:
-            cogs_acct = _resolve_line_account(p, 'cogs', tenant_id=tenant_id) if cogs_diff else None
-            inv_acct = _resolve_line_account(p, 'inventory', tenant_id=tenant_id) if diff else None
-            lines_data = build_cogs_adjustment_lines(
-                cogs_diff=cogs_diff,
-                variance_diff=variance_diff,
-                inv_diff=diff,
-                cogs_account_id=cogs_acct.id if cogs_acct else None,
-                variance_account_id=variance_acct_id,
-                inv_account_id=inv_acct.id if inv_acct else None,
-                cogs_description='تسوية ت.ب.م',
-                variance_description='فروقات تكلفة المبيعات',
-                inv_description='تسوية مخزون',
-            )
-            # تاريخ التسوية = آخر تاريخ بيع (ضمن فترة البيانات/الفترة المحاسبية المفتوحة).
-            sale_dates = [m.movement_date for m in out_moves if m.movement_date]
-            txn_date = max(sale_dates) if sale_dates else timezone.localdate()
-            journal = post_journal(
-                tenant_id=tenant_id,
-                transaction_date=txn_date,
-                reference_type='COGS_RECONCILE',
-                reference_id=product_id,
-                description=f"تسوية تكلفة المبيعات — {p.sku}",
-                lines_data=lines_data,
-                user=user if user and not getattr(user, 'is_anonymous', False) else None,
-            )
-        result['applied'] = True
-        result['journal_id'] = journal.id if journal else None
-    logger.info(
-        "reconcile_product_cogs product=%s avg=%s diff=%s journal=%s",
-        product_id, avg, diff, result['journal_id'],
-    )
-    return result
 
 
 # ════════════════════════════════════════════════════════════════════
