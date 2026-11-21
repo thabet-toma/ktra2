@@ -12,11 +12,17 @@
   7. عدّ الاستعلامات: `open_layers_value`/`open_layers_quantity` استعلامٌ واحد
      لعشرة منتجات معاً.
   8. `derived_avg_cost` بصفر كمية ⟵ صفر بلا انفجار.
+  9. AVCO: توزيع تناسبي، فائض يعود للخلف، ونفاد الطبقات.
+  10. ردّ تناسبي وأصول مختلطة، وبقاء ردّ FIFO كما هو.
+  11. عدد الاستعلامات ثابت؛ وترتيب الرد ثابت بعد إعادة إنشاء الصفوف.
+  12. رفض طريقة صرف مجهولة، وصرف الطرق الأخرى بترتيب FIFO.
 """
 from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 
 from inventory.fifo import (
     consume,
@@ -25,8 +31,9 @@ from inventory.fifo import (
     open_layers_quantity,
     open_layers_value,
     restore,
+    restore_partial,
 )
-from inventory.models import Product, StockLayer, StockLayerConsumption, StockMovement
+from inventory.models import Product, StockLayer, StockLayerConsumption, StockLayerRestoration, StockMovement
 from tenants.services import create_company
 
 
@@ -233,3 +240,233 @@ def test_derived_avg_cost_matches_value_over_quantity():
     # (50*10 + 20*60) / 70 = (500+1200)/70 = 24.285714... -> quantized 4 decimals
     expected = (Decimal("1700") / Decimal("70")).quantize(Decimal("0.0001"))
     assert derived_avg_cost(tenant_id=tenant.TenantID, product_id=product.id) == expected
+
+
+def _avco_setup(name):
+    tenant = _make_tenant(name)
+    product = _make_product(tenant, name)
+    a = _lay_in(tenant, product, "8", "10", "2026-01-01")
+    b = _lay_in(tenant, product, "4", "16", "2026-01-02")
+    out = _movement(tenant, product, mtype="OUT", qty="10")
+    return tenant, product, a, b, out
+
+
+def _rows(model, **filters):
+    return list(model.objects.filter(**filters).order_by("id").values_list(
+        "layer_id", "quantity", "unit_cost"))
+
+
+def _remaining(*layers):
+    for layer in layers:
+        layer.refresh_from_db()
+    return [layer.remaining_qty for layer in layers]
+
+
+@pytest.mark.django_db
+def test_avco_restore_after_replayed_rows():
+    """يثبت ترتيب ردّ AVCO بعد إعادة إنشاء صفوف الاستهلاك."""
+    tenant, product, a, b, out = _avco_setup("AVCO-REPLAY")
+    out.cogs_method = "avco"
+    out.save(update_fields=["cogs_method"])
+    for layer, qty, remaining in [(b, "3.3334", "0.6666"), (a, "6.6666", "1.3334")]:
+        layer.remaining_qty = Decimal(remaining)
+        layer.save(update_fields=["remaining_qty"])
+        StockLayerConsumption.objects.create(
+            tenant=tenant, movement=out, layer=layer,
+            quantity=Decimal(qty), unit_cost=layer.unit_cost,
+        )
+    ret = _movement(tenant, product, mtype="IN", qty="4")
+    result = restore_partial(movements=[out], quantity="4", restored_by=ret)
+    assert _rows(StockLayerRestoration, movement=ret) == [
+        (a.pk, Decimal("2.6666"), Decimal("10")),
+        (b.pk, Decimal("1.3334"), Decimal("16")),
+    ]
+    assert result.cost == Decimal("48.0004")
+    assert dict(StockLayerConsumption.objects.filter(movement=out).values_list(
+        "layer_id", "quantity",
+    )) == {a.pk: Decimal("4.0000"), b.pk: Decimal("2.0000")}
+    assert _remaining(a, b) == [Decimal("4.0000"), Decimal("2.0000")]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("method", [None, "AVCO", "x"])
+def test_consume_rejects_unknown_method(method):
+    """يرفض طريقة الصرف المجهولة قبل الاستعلام."""
+    tenant, product, a, b, out = _avco_setup("INVALID-" + str(method))
+    with CaptureQueriesContext(connection) as queries:
+        with pytest.raises(ValueError, match="Unknown COGS method"):
+            consume(movement=out, quantity="10", method=method)
+    assert len(queries) == 0
+    assert _remaining(a, b) == [Decimal("8"), Decimal("4")]
+    assert not StockLayerConsumption.objects.filter(movement=out).exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("method", ["fifo", "standard", "last_purchase"])
+def test_fifo_wise_methods(method):
+    """تستهلك الطرق المحددة بترتيب FIFO."""
+    tenant, product, a, b, out = _avco_setup("METHOD-" + method)
+    result = consume(movement=out, quantity="10", method=method)
+    assert (result.cost, result.uncovered_qty) == (Decimal("112"), Decimal("0"))
+    assert _remaining(a, b) == [Decimal("0"), Decimal("2")]
+    assert _rows(StockLayerConsumption, movement=out) == [
+        (a.pk, Decimal("8"), Decimal("10")),
+        (b.pk, Decimal("2"), Decimal("16")),
+    ]
+
+
+@pytest.mark.django_db
+def test_avco_owner_example():
+    """يتحقق من مثال المالك للصرف التناسبي."""
+    tenant, product, a, b, out = _avco_setup("AVCO-T1")
+    result = consume(movement=out, quantity="10", method="avco")
+    assert _rows(StockLayerConsumption, movement=out) == [
+        (a.pk, Decimal("6.6666"), Decimal("10")),
+        (b.pk, Decimal("3.3334"), Decimal("16")),
+    ]
+    assert (result.cost, result.uncovered_qty) == (Decimal("120.0004"), Decimal("0"))
+    assert _remaining(a, b) == [Decimal("1.3334"), Decimal("0.6666")]
+    c = _lay_in(tenant, product, "8", "20", "2026-01-03")
+    out2 = _movement(tenant, product, mtype="OUT", qty="10")
+    result = consume(movement=out2, quantity="10", method="avco")
+    assert result.cost == Decimal("183.9996")
+    assert result.uncovered_qty == 0
+    assert _remaining(a, b, c) == [0, 0, 0]
+
+
+@pytest.mark.django_db
+def test_avco_spill_back():
+    """الباقي الساذج في الطبقة الأخيرة يجعلها سالبة بمقدار 0.0002."""
+    tenant = _make_tenant("AVCO-T2")
+    product = _make_product(tenant, "AVCO-T2")
+    layers = [
+        _lay_in(tenant, product, qty, str(10 + i), f"2026-01-0{i + 1}")
+        for i, qty in enumerate(["1", "1", "1", "0.0001"])
+    ]
+    out = _movement(tenant, product, mtype="OUT", qty="3")
+    consume(movement=out, quantity="3", method="avco")
+    quantities = [r[1] for r in _rows(StockLayerConsumption, movement=out)]
+    assert quantities == list(map(Decimal, ["0.9999", "1.0000", "1.0000", "0.0001"]))
+    assert sum(quantities) == Decimal("3.0000")
+    assert all(q >= 0 for q in _remaining(*layers))
+
+
+@pytest.mark.django_db
+def test_avco_running_out():
+    """يعيد الكمية غير المغطّاة عند نفاد الطبقات."""
+    tenant = _make_tenant("AVCO-T3")
+    product = _make_product(tenant, "AVCO-T3")
+    layers = [_lay_in(tenant, product, "2", "10"), _lay_in(tenant, product, "3", "20")]
+    out = _movement(tenant, product, mtype="OUT", qty="7")
+    result = consume(movement=out, quantity="7", method="avco")
+    assert (result.cost, result.uncovered_qty) == (Decimal("80.0000"), Decimal("2.0000"))
+    assert _remaining(*layers) == [0, 0]
+
+
+@pytest.mark.django_db
+def test_avco_proportional_restore():
+    """يردّ استهلاك AVCO تناسبياً إلى طبقاته."""
+    tenant, product, a, b, out = _avco_setup("AVCO-T4")
+    consume(movement=out, quantity="10", method="avco")
+    out.cogs_method = "avco"
+    out.save(update_fields=["cogs_method"])
+    ret = _movement(tenant, product, mtype="IN", qty="4")
+    result = restore_partial(movements=[out], quantity="4", restored_by=ret)
+    assert (result.quantity, result.cost, result.rows) == (
+        Decimal("4.0000"), Decimal("48.0004"), 2,
+    )
+    assert result.by_origin == {out.pk: (Decimal("4.0000"), Decimal("48.0004"))}
+    assert _rows(StockLayerRestoration, movement=ret) == [
+        (a.pk, Decimal("2.6666"), Decimal("10")),
+        (b.pk, Decimal("1.3334"), Decimal("16")),
+    ]
+    assert set(StockLayerRestoration.objects.filter(movement=ret).values_list(
+        "origin_movement_id", flat=True,
+    )) == {out.pk}
+    assert _rows(StockLayerConsumption, movement=out) == [
+        (a.pk, Decimal("4"), Decimal("10")), (b.pk, Decimal("2"), Decimal("16")),
+    ]
+    assert _remaining(a, b) == [Decimal("4"), Decimal("2")]
+    restore_partial(movements=[out], quantity="6", restored_by=ret)
+    assert not StockLayerConsumption.objects.filter(movement=out).exists()
+    assert _remaining(a, b) == [Decimal("8"), Decimal("4")]
+
+
+@pytest.mark.django_db
+def test_avco_mixed_origins():
+    """يردّ الأصول المختلطة حسب طريقة كل أصل."""
+    tenant = _make_tenant("AVCO-T5")
+    product = _make_product(tenant, "AVCO-T5")
+    a = _lay_in(tenant, product, "8", "10")
+    b = _lay_in(tenant, product, "8", "20", "2026-01-02")
+    avco = _movement(tenant, product, mtype="OUT", qty="6")
+    avco.cogs_method = "avco"
+    avco.save(update_fields=["cogs_method"])
+    consume(movement=avco, quantity="6", method="avco")
+    fifo = _movement(tenant, product, mtype="OUT", qty="4")
+    fifo.cogs_method = "fifo"
+    fifo.save(update_fields=["cogs_method"])
+    consume(movement=fifo, quantity="4")
+    ret = _movement(tenant, product, mtype="IN", qty="7")
+    restore_partial(movements=[fifo, avco], quantity="7", restored_by=ret)
+    assert _remaining(a, b) == [Decimal("6.5"), Decimal("6.5")]
+    assert list(StockLayerRestoration.objects.filter(movement=ret).order_by("id").values_list(
+        "origin_movement_id", "layer_id", "quantity", "unit_cost",
+    )) == [
+        (fifo.pk, a.pk, Decimal("4"), Decimal("10")),
+        (avco.pk, a.pk, Decimal("1.5"), Decimal("10")),
+        (avco.pk, b.pk, Decimal("1.5"), Decimal("20")),
+    ]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("method", [None, "fifo"])
+def test_fifo_restore_unchanged(method):
+    """يبقى ردّ FIFO بعكس ترتيب الاستهلاك."""
+    tenant, product, a, b, out = _avco_setup("FIFO-T6-" + str(method))
+    out.cogs_method = method
+    out.save(update_fields=["cogs_method"])
+    # نفس صفّي مثال AVCO، لكن الأصل FIFO.
+    for layer, qty in [(a, "6.6666"), (b, "3.3334")]:
+        layer.remaining_qty -= Decimal(qty)
+        layer.save(update_fields=["remaining_qty"])
+        StockLayerConsumption.objects.create(
+            tenant=tenant, movement=out, layer=layer,
+            quantity=Decimal(qty), unit_cost=layer.unit_cost,
+        )
+    ret = _movement(tenant, product, mtype="IN", qty="4")
+    result = restore_partial(movements=[out], quantity="4", restored_by=ret)
+    assert result.cost == Decimal("60.0004")
+    assert _rows(StockLayerRestoration, movement=ret) == [
+        (b.pk, Decimal("3.3334"), Decimal("16")),
+        (a.pk, Decimal("0.6666"), Decimal("10")),
+    ]
+    assert _remaining(a, b) == [Decimal("2"), Decimal("4")]
+
+
+@pytest.mark.django_db
+def test_avco_query_count_is_constant():
+    """يبقى عدد استعلامات AVCO ثابتاً مع زيادة الطبقات."""
+    tenant = _make_tenant("AVCO-T7")
+    samples = []
+    for count in (20, 200):
+        product = _make_product(tenant, f"AVCO-T7-{count}")
+        for _ in range(count):
+            _lay_in(tenant, product, "10", "10")
+        out = _movement(tenant, product, mtype="OUT", qty=str(count * 5))
+        out.cogs_method = "avco"
+        out.save(update_fields=["cogs_method"])
+        ret = _movement(tenant, product, mtype="IN", qty=str(count))
+        samples.append((count, out, ret))
+    consume_counts, restore_counts = [], []
+    for count, out, ret in samples:
+        with CaptureQueriesContext(connection) as queries:
+            consume(movement=out, quantity=str(count * 5), method="avco")
+        consume_counts.append(len(queries))
+        with CaptureQueriesContext(connection) as queries:
+            restore_partial(movements=[out], quantity=str(count), restored_by=ret)
+        restore_counts.append(len(queries))
+    assert consume_counts[0] == consume_counts[1]
+    assert restore_counts[0] == restore_counts[1]
+    assert consume_counts[0] == 5
+    assert restore_counts[0] == 8

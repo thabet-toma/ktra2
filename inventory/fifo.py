@@ -5,6 +5,7 @@
 كلفة كل صرفٍ مشتقّةٌ من ترتيب ورود البضاعة نفسه — لا من رقمٍ يُدخله أحد ولا
 من متوسطٍ يُذيب كل الوارِدات في رقمٍ واحد. صرفٌ يستهلك طبقتين مختلفتي السعر
 يحمل كلفتين مختلفتين حقيقيّتين، بدل متوسطٍ يُخفي الفرق.
+ويتوفر نمط AVCO اختياري يوزّع الصرف تناسبياً على الطبقات المفتوحة.
 
 `StockLayerConsumption` هو ما يجعل «الرَّدّ الدقيق» ممكناً: حين يُلغى ترحيل
 حركة صرف، `restore()` تقرأ بالضبط أيّ طبقةٍ أُخذ منها وكم، فتُعيد الكمية إلى
@@ -18,7 +19,7 @@
 والباقي غير المغطّى صراحةً.
 """
 import datetime
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from typing import NamedTuple
 
 from django.db import transaction
@@ -26,6 +27,10 @@ from django.db.models import DecimalField, F, Q, Sum
 from django.db.models.functions import Coalesce
 
 from .models import (
+    COGS_METHOD_AVCO,
+    COGS_METHOD_FIFO,
+    COGS_METHOD_LAST_PURCHASE,
+    COGS_METHOD_STANDARD,
     Product,
     StockLayer,
     StockLayerConsumption,
@@ -231,9 +236,33 @@ def layer_balance_gaps(*, tenant_id: int, product_ids=None) -> list[dict]:
     return gaps
 
 
-def consume(*, movement: StockMovement, quantity) -> ConsumeResult:
-    """يستهلك `quantity` بترتيب FIFO (الأقدم أوّلاً) من طبقات (الشركة، المنتج)
-    المفتوحة، وينشئ صفّ `StockLayerConsumption` لكل طبقةٍ أُخذ منها.
+def _proportional_takes(quantity, amounts):
+    """يوزّع الكمية تناسبياً مع التقريب نزولاً إلى أربع منازل (ROUND_DOWN).
+    يأخذ العنصر الأخير الباقي حتى حدّه، ويُوزَّع الفائض على السابقين رجوعاً؛ وإذا بلغت الكمية المجموع أو تجاوزته تُردّ المقادير كما هي.
+    """
+    total = sum(amounts, Decimal("0"))
+    if quantity >= total:
+        return list(amounts)
+    shares = [(quantity * amount / total).quantize(Q4, rounding=ROUND_DOWN) for amount in amounts[:-1]]
+    last = quantity - sum(shares, Decimal("0"))
+    shares.append(min(last, amounts[-1]))
+    overflow = last - shares[-1]
+    for i in range(len(shares) - 2, -1, -1):
+        extra = min(overflow, amounts[i] - shares[i])
+        shares[i] += extra
+        overflow -= extra
+        if overflow <= 0:
+            break
+    return shares
+
+
+def consume(*, movement: StockMovement, quantity, method=COGS_METHOD_FIFO) -> ConsumeResult:
+    """يستهلك `quantity` من طبقات (الشركة، المنتج) المفتوحة، بترتيب FIFO
+    (الأقدم أوّلاً) في طرق FIFO و`standard` و`last_purchase`، وينشئ صفّ
+    `StockLayerConsumption` لكل طبقةٍ أُخذ منها.
+
+    يحدّد `method` طريقة الصرف؛ يوزّع AVCO تناسبياً على الطبقات المفتوحة،
+    وتُرفض الطريقة غير المعروفة باستثناء `ValueError` قبل أي استعلام.
 
     محصورٌ بالشركة والمنتج معاً (لا بالمستودع — انظر docstring `StockLayer`).
     يقفل صفوف الطبقات (`select_for_update`) كي لا يتجاوز استهلاكان متزامنان
@@ -243,6 +272,8 @@ def consume(*, movement: StockMovement, quantity) -> ConsumeResult:
     والكمية غير المغطّاة > صفر — بلا استثناء، فتلك حالة المخزون السالب
     ومسؤولية طبقةٍ مؤقّتة (`is_provisional`) في مرحلةٍ لاحقة.
     """
+    if method not in (COGS_METHOD_FIFO, COGS_METHOD_AVCO, COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE):
+        raise ValueError(f"Unknown COGS method: {method!r}")
     quantity = _d(quantity).quantize(Q4)
     if quantity <= 0:
         return ConsumeResult(cost=Decimal("0"), uncovered_qty=Decimal("0"))
@@ -253,6 +284,27 @@ def consume(*, movement: StockMovement, quantity) -> ConsumeResult:
             .filter(tenant_id=movement.tenant_id, product_id=movement.product_id, remaining_qty__gt=0)
             .order_by("layer_date", "id")
         )
+        if method == COGS_METHOD_AVCO:
+            takes = _proportional_takes(quantity, [layer.remaining_qty for layer in layers])
+            changed, consumptions = [], []
+            total_cost = Decimal("0")
+            for layer, take in zip(layers, takes):
+                if take <= 0:
+                    continue
+                layer.remaining_qty = (layer.remaining_qty - take).quantize(Q4)
+                changed.append(layer)
+                consumptions.append(StockLayerConsumption(
+                    tenant_id=movement.tenant_id, movement=movement, layer=layer,
+                    quantity=take, unit_cost=layer.unit_cost,
+                ))
+                total_cost += take * layer.unit_cost
+            StockLayer.objects.bulk_update(changed, ["remaining_qty"])
+            StockLayerConsumption.objects.bulk_create(consumptions)
+            return ConsumeResult(
+                cost=total_cost.quantize(Q4),
+                uncovered_qty=(quantity - sum(takes, Decimal("0"))).quantize(Q4),
+            )
+
         remaining = quantity
         total_cost = Decimal("0")
         for layer in layers:
@@ -484,9 +536,74 @@ class RestoreResult(NamedTuple):
     by_origin: dict[int, tuple[Decimal, Decimal]]
 
 
+def _restore_mixed(consumptions, methods, quantity, restored_by):
+    """يردّ الأصول واحداً تلو الآخر بترتيب معرّف أحدث صفّ لكل أصل تنازلياً؛ وغير AVCO من الأحدث داخل أصله لا بترتيب صفوف شامل، وAVCO تناسبياً بترتيب تاريخ الطبقة ومعرّفها ثمّ الصف تصاعدياً.
+    تُقرَّب الحصص نزولاً إلى أربع منازل (ROUND_DOWN)، وللأخير الباقي حتى حدّه والفائض للسابقين رجوعاً.
+    """
+    layers = {layer.pk: layer for layer in StockLayer.objects.select_for_update().filter(
+        pk__in=[c.layer_id for c in consumptions]
+    )}
+    groups = {}
+    for c in consumptions:
+        groups.setdefault(c.movement_id, []).append(c)
+    remaining = None if quantity is None else _d(quantity).quantize(Q4)
+    restored_qty = restored_cost = Decimal("0")
+    by_origin, changed_layers, shrunk, drop_ids, restorations = {}, {}, [], [], []
+    rows = 0
+    for origin, group in groups.items():
+        if remaining is not None and remaining <= 0:
+            break
+        total = sum((c.quantity for c in group), Decimal("0"))
+        take_total = total if remaining is None else min(remaining, total)
+        if methods.get(origin) == COGS_METHOD_AVCO:
+            group = sorted(group, key=lambda c: (layers[c.layer_id].layer_date, c.layer_id, c.id))
+            takes = _proportional_takes(take_total, [c.quantity for c in group])
+        else:
+            left = take_total
+            takes = []
+            for c in group:
+                take = min(c.quantity, left)
+                takes.append(take)
+                left -= take
+        for c, take in zip(group, takes):
+            if take <= 0:
+                continue
+            layer = layers[c.layer_id]
+            layer.remaining_qty = (layer.remaining_qty + take).quantize(Q4)
+            changed_layers[layer.pk] = layer
+            if restored_by is not None:
+                restorations.append(StockLayerRestoration(
+                    tenant_id=layer.tenant_id, movement=restored_by,
+                    origin_movement_id=origin, layer=layer, quantity=take, unit_cost=c.unit_cost,
+                ))
+            cost = take * c.unit_cost
+            restored_qty += take
+            restored_cost += cost
+            origin_qty, origin_cost = by_origin.get(origin, (Decimal("0"), Decimal("0")))
+            by_origin[origin] = (origin_qty + take, origin_cost + cost)
+            rows += 1
+            if take >= c.quantity:
+                drop_ids.append(c.pk)
+            else:
+                c.quantity = (c.quantity - take).quantize(Q4)
+                shrunk.append(c)
+        if remaining is not None:
+            remaining -= take_total
+    StockLayer.objects.bulk_update(list(changed_layers.values()), ["remaining_qty"])
+    StockLayerConsumption.objects.bulk_update(shrunk, ["quantity"])
+    if drop_ids:
+        StockLayerConsumption.objects.filter(pk__in=drop_ids).delete()
+    StockLayerRestoration.objects.bulk_create(restorations)
+    return RestoreResult(
+        quantity=restored_qty.quantize(Q4), cost=restored_cost.quantize(Q4),
+        rows=rows, by_origin=by_origin,
+    )
+
+
 def restore_partial(*, movements, quantity=None, restored_by=None) -> RestoreResult:
     """يردّ استهلاكَ حركةٍ (أو حركاتِ مستندٍ واحدٍ لمنتجٍ واحد) إلى طبقاتها —
-    كلَّه أو `quantity` منه — **بعكس ترتيب الاستهلاك**.
+    كلَّه أو `quantity` منه — بعكس ترتيب الاستهلاك للأصول غير AVCO؛ أمّا
+    أصول AVCO فتُردّ تناسبياً بترتيب تاريخ الطبقة ومعرّفها ثمّ معرّف الصف؛ وعند وجود أصل AVCO تُعالَج الأصول واحداً تلو الآخر بترتيب معرّف أحدث صفّ لكل أصل تنازلياً، فيُفكّ غير AVCO من الأحدث داخل أصله لا بترتيب صفوف شامل.
 
     ولماذا العكس؟ لأنّ النتيجة تصير **مطابقةً تماماً** لما لو كانت البيعةُ
     الأصليّة بالكميّة الباقية بعد المرتجع: بيعُ عشرةٍ استهلك ثمانياً من طبقةٍ
@@ -517,6 +634,10 @@ def restore_partial(*, movements, quantity=None, restored_by=None) -> RestoreRes
         )
         if not consumptions:
             return RestoreResult(Decimal("0"), Decimal("0"), 0, {})
+
+        methods = dict(StockMovement.objects.filter(pk__in=movement_ids).values_list("pk", "cogs_method"))
+        if COGS_METHOD_AVCO in methods.values():
+            return _restore_mixed(consumptions, methods, quantity, restored_by)
 
         remaining = None if quantity is None else _d(quantity).quantize(Q4)
         locked_layers = {
