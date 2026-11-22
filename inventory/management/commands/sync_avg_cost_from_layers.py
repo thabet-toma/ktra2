@@ -6,6 +6,7 @@
 - يضبط المنتجات ذات الرصيد `<= 0` أو المغطّاة بالكامل بالطبقات المفتوحة.
 - يتخطّى المنتجات ذات الرصيد الموجب غير المغطّى بالطبقات (`skipped_uncovered`)
   كي لا يضيع `avg_cost` الذي يحتاجه `fifo.backfill_opening_layer`.
+- يتخطّى المنتجات التي لم تكن لها طبقةٌ قط إن كان هدفها صفراً وكلفتها غير صفرية، فتبقى كلفتها (`skipped_no_layers`).
 
 الافتراض معاينةٌ لا تكتب شيئاً؛ `--apply` يكتب التعديلات.
 """
@@ -44,7 +45,7 @@ class Command(BaseCommand):
         else:
             tenants = list(Tenant.objects.order_by("TenantID"))
 
-        counts = {"synced": 0, "unchanged": 0, "skipped_uncovered": 0}
+        counts = {"synced": 0, "unchanged": 0, "skipped_uncovered": 0, "skipped_no_layers": 0}
         for tenant in tenants:
             products = Product.objects.filter(tenant_id=tenant.TenantID).order_by("pk")
             for product in products:
@@ -62,11 +63,17 @@ class Command(BaseCommand):
                         f"[{tenant.TenantID}] {product.sku} (تخطّي — غير مغطّى): "
                         f"يبقى {res['before']}"
                     ))
+                elif status == "skipped_no_layers":
+                    self.stdout.write(self.style.WARNING(
+                        f"[{tenant.TenantID}] {product.sku} (تخطّي — بلا طبقات): "
+                        f"يبقى {res['before']}"
+                    ))
 
         self.stdout.write(
             f"الملخّص: synced={counts['synced']} · "
             f"unchanged={counts['unchanged']} · "
-            f"skipped_uncovered={counts['skipped_uncovered']}"
+            f"skipped_uncovered={counts['skipped_uncovered']} · "
+            f"skipped_no_layers={counts['skipped_no_layers']}"
         )
         if apply:
             self.stdout.write(self.style.SUCCESS(f"تمّت مزامنة {counts['synced']} منتج."))

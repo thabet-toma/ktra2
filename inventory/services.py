@@ -2421,10 +2421,12 @@ def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
     تحت `transaction.atomic()` + قفل `select_for_update` على المنتج:
     - إن كان `quantity_on_hand <= 0` أو طابق مجموع `remaining_qty` للطبقات
       المفتوحة `quantity_on_hand`: الهدف = `fifo.derived_avg_cost` مقرَّباً إلى
-      4 منازل عشرية (صفرٌ بلا طبقات مفتوحة). الحالة `'synced'` أو `'unchanged'`.
+      4 منازل عشرية (صفرٌ بلا طبقات مفتوحة). الحالة `'synced'` أو `'unchanged'`، إلّا الاستثناء أدناه.
     - أمّا رصيدٌ موجبٌ غير مغطّى بالكامل بالطبقات (بياناتٌ قديمة بلا طبقات)
       فحالته `'skipped_uncovered'` ولا يُكتَب شيءٌ (لأن `backfill_opening_layer`
       يحتاج القيمة السابقة).
+    - إن كان الهدف صفراً وكلفته السابقة غير صفرية ولم تكن للمنتج طبقةٌ قط، فحالته `'skipped_no_layers'` ولا يُكتَب
+      شيءٌ: `avg_cost` هو الكلفة الوحيدة المعروفة وتسعير الطبقة المؤقتة يحتاجه.
 
     يكتب `avg_cost` فقط عند `apply=True`.
     """
@@ -2448,6 +2450,15 @@ def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
         target = fifo.derived_avg_cost(
             tenant_id=prod.tenant_id, product_id=prod.pk,
         ).quantize(q4)
+        if target == 0 and before != 0 and not StockLayer.objects.filter(
+            tenant_id=prod.tenant_id, product_id=prod.pk,
+        ).exists():
+            return {
+                'product_id': prod.pk,
+                'before': before,
+                'after': before,
+                'status': 'skipped_no_layers',
+            }
         if target == before:
             return {
                 'product_id': prod.pk,

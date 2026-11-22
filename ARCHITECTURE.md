@@ -28,7 +28,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة وحدود الخطط **وأسعارها**، الداشبورد، المساعد الذكي | 21,000 | 14,500 | `/api/` (متفرّق) |
 | `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 17,500 | 10,700 | `/api/accounting/` |
 | `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 16,000 | 17,700 | `/api/sales/` |
-| `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد) وطبقات كلفة FIFO (`fifo.py` — والمتوسّط مشتقٌّ منها للعرض) والأرقام التسلسلية وحالة المخزون وحدود التجديد وروابط عدّ الجرد العامة (`StocktakeCountLink`) | 11,500 | 13,700 | `/api/inventory/` |
+| `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد) وطبقات كلفة FIFO (`fifo.py` — والمتوسّط مشتقٌّ منها للعرض) والأرقام التسلسلية وحالة المخزون وحدود التجديد وروابط عدّ الجرد العامة (`StocktakeCountLink`) | 11,600 | 13,700 | `/api/inventory/` |
 | `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة**، ولبطاقة الكفالة صفحة تحقق **عامة بلا مصادقة** يفتحها الزبون بمسح QR (#237) | 8,000 | 12,100 | `/api/after-sales/` · `/api/w/` |
 | `hr` | الموظفون والرواتب والحضور الجغرافي والورديات والعقود والطلبات والسلف والخدمة الذاتية | 7,700 | 4,500 | `/api/hr/` |
 | `employee_ops` | متابعة الموظفين: المهامّ والنقاط والتوظيف الآمن (تقديمٌ عام وسيرةٌ محميّة) — **وحدة مرخّصة، معزولة** | 5,700 | 5,500 | `/api/employee-ops/` |
@@ -133,7 +133,7 @@ API كاملة (404) لقالب شركة بعينه — طرحيّ لا إضاف
 المخالفات التاريخية (كتابة قيود مباشرة متجاوزةً `post_journal`) **عولجت في المرحلة 2** — كل الكتابة الخارجية الآن عبر `accounting/api.py`، ويحرسها عقد `no-direct-accounting-models` في `.importlinter`.
 
 ### 4. المخزون
-`quantity_on_hand` لا يتغيّر إلا عبر `inventory/services.py` (`record_stock_movement`) و`inventory/services.py` (`_recompute_product_stock`). أمّا `Product.avg_cost` فكُتّاب وقت التشغيل له (كل حركة، والاستلام، وإعادة تقييم التكلفة المستوردة، ومساعد/أمر المزامنة) — `inventory/services.py` (`record_stock_movement`)، و`inventory/services.py` (`_recompute_product_stock`)، و`logistics/domain/landed_revaluation.py` (`apply`)، و`inventory/services.py` (`sync_avg_cost_from_layers`) (وعبرها `inventory/management/commands/sync_avg_cost_from_layers.py` (`Command`)) — يضبطونها جميعاً على متوسط طبقات FIFO المفتوحة عبر `inventory/fifo.py` (`derived_avg_cost`).
+`quantity_on_hand` لا يتغيّر إلا عبر `inventory/services.py` (`record_stock_movement`) و`inventory/services.py` (`_recompute_product_stock`). أمّا `Product.avg_cost` فكُتّاب وقت التشغيل له (كل حركة، والاستلام، وإعادة تقييم التكلفة المستوردة، ومساعد/أمر المزامنة) — `inventory/services.py` (`record_stock_movement`)، و`inventory/services.py` (`_recompute_product_stock`)، و`logistics/domain/landed_revaluation.py` (`apply`)، و`inventory/services.py` (`sync_avg_cost_from_layers`) (وعبرها `inventory/management/commands/sync_avg_cost_from_layers.py` (`Command`)) — يضبطونها جميعاً على متوسط طبقات FIFO المفتوحة عبر `inventory/fifo.py` (`derived_avg_cost`). وتستثني `inventory/services.py` (`sync_avg_cost_from_layers`) منتجاً لم تكن له طبقة قط عند هدف صفر، فتبقي كلفته السابقة (`skipped_no_layers`).
 
 **طرق تكلفة المبيعات:** عقدُ البيانات:
 `SalesSettings.cogs_cost_method` (افتراض `fifo`) و`SalesSettings.cost_variance_account`،

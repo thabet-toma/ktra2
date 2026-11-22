@@ -17,6 +17,7 @@ from django.core.management.base import CommandError
 
 from accounting.models import JournalHeader
 from inventory.models import Product, StockLayer, StockMovement
+from inventory.services import record_stock_movement, sync_avg_cost_from_layers
 from tenants.services import create_company
 
 pytestmark = pytest.mark.django_db
@@ -103,7 +104,7 @@ def test_apply_requires_a_tenant(broken):
 
 
 def test_m0_t5_sync_avg_cost_from_layers_command():
-    """T5: أمر sync_avg_cost_from_layers — المعاينة لا تكتب، --apply يضبط المغطّى والصفر، يترك المتطابق (unchanged)، يتخطّى غير المغطّى، ويعزل الشركات بعدّادات دقيقة."""
+    """T5: المعاينة لا تكتب، والتطبيق يزامن المغطّى والمستهلك ويتخطّى غير المغطّى ومن لا طبقات له، مع عزل الشركات."""
     tenant_a = _tenant("مزامنة-أ")
     tenant_b = _tenant("مزامنة-ب")
 
@@ -115,6 +116,10 @@ def test_m0_t5_sync_avg_cost_from_layers_command():
     _layer(tenant_a, unchanged_a, "5", "30")  # avg_cost يطابق متوسط الطبقات المفتوحة
 
     zero_qoh = _product(tenant_a, "SYNC-ZERO", "0", "99")
+    used = _product(tenant_a, "SYNC-USED", "0", "77")
+    used_layer = _layer(tenant_a, used, "3", "40")
+    used_layer.remaining_qty = Decimal("0")
+    used_layer.save(update_fields=["remaining_qty"])
     uncovered = _product(tenant_a, "SYNC-UNC", "7", "55")
     other_b = _product(tenant_b, "SYNC-B", "0", "88")
 
@@ -124,6 +129,7 @@ def test_m0_t5_sync_avg_cost_from_layers_command():
         (covered, "15"),
         (unchanged_a, "30"),
         (zero_qoh, "99"),
+        (used, "77"),
         (uncovered, "55"),
         (other_b, "88"),
     ):
@@ -134,24 +140,28 @@ def test_m0_t5_sync_avg_cost_from_layers_command():
     with patch.object(Product, "save", autospec=True, side_effect=Product.save) as save:
         call_command("sync_avg_cost_from_layers", "--tenant", str(tenant_a.TenantID), "--apply", stdout=apply_out)
     assert unchanged_a.pk not in [call.args[0].pk for call in save.call_args_list]
+    assert zero_qoh.pk not in [call.args[0].pk for call in save.call_args_list]
     apply_txt = apply_out.getvalue()
     covered.refresh_from_db()
     unchanged_a.refresh_from_db()
     zero_qoh.refresh_from_db()
+    used.refresh_from_db()
     uncovered.refresh_from_db()
     other_b.refresh_from_db()
 
     assert covered.avg_cost == Decimal("16.0000")
     assert unchanged_a.avg_cost == Decimal("30.0000")
-    assert zero_qoh.avg_cost == Decimal("0.0000")
+    assert zero_qoh.avg_cost == Decimal("99.0000")
+    assert used.avg_cost == Decimal("0.0000")
     assert uncovered.avg_cost == Decimal("55.0000")
     assert other_b.avg_cost == Decimal("88.0000")
     assert "SYNC-COV" in apply_txt
     assert "SYNC-UNC" in apply_txt
+    assert f"[{tenant_a.TenantID}] SYNC-ZERO (تخطّي — بلا طبقات): يبقى 99.0000" in apply_txt
     # (a) المتطابق لا يُمسّ ولا يطبع سطر تحديث/تخطّي
     assert "SYNC-SAME" not in apply_txt
     # (b) سطر الملخّص لـ --apply --tenant A يطابق التركيبات بالضبط
-    assert "الملخّص: synced=2 · unchanged=1 · skipped_uncovered=1" in apply_txt
+    assert "الملخّص: synced=2 · unchanged=1 · skipped_uncovered=1 · skipped_no_layers=1" in apply_txt
     assert "تمّت مزامنة 2 منتج." in apply_txt
 
 
@@ -175,8 +185,43 @@ def test_m0_t5_sync_avg_cost_from_layers_dry_run_without_tenant():
 
     assert f"[{tenant_a.TenantID}] ALL-COV-A" in txt
     assert f"[{tenant_b.TenantID}] ALL-UNC-B" in txt
-    assert f"[{tenant_b.TenantID}] ALL-ZERO-B" in txt
-    assert "الملخّص: synced=2 · unchanged=1 · skipped_uncovered=1" in txt
+    assert f"[{tenant_b.TenantID}] ALL-ZERO-B (تخطّي — بلا طبقات): يبقى 88.0000" in txt
+    assert "الملخّص: synced=1 · unchanged=1 · skipped_uncovered=1 · skipped_no_layers=1" in txt
     for prod, expected in ((cov_a, "15"), (same_a, "30"), (unc_b, "45"), (zero_b, "88")):
         prod.refresh_from_db()
         assert prod.avg_cost == Decimal(expected)
+
+
+def test_sync_avg_cost_keeps_cost_of_product_without_any_layer():
+    tenant = _tenant("مزامنة-بلا-طبقات")
+    product = _product(tenant, "NO-LAYER", "-1", "1050")
+    result = sync_avg_cost_from_layers(product, apply=True)
+    product.refresh_from_db()
+    assert result["status"] == "skipped_no_layers"
+    assert result["before"] == result["after"] == Decimal("1050.0000")
+    assert product.avg_cost == Decimal("1050.0000")
+
+    zero = _product(tenant, "NO-LAYER-ZERO", "0", "0")
+    assert sync_avg_cost_from_layers(zero, apply=True)["status"] == "unchanged"
+
+    used = _product(tenant, "USED-LAYER", "-2", "40")
+    layer = _layer(tenant, used, "3", "40")
+    layer.remaining_qty = Decimal("0")
+    layer.save(update_fields=["remaining_qty"])
+    result = sync_avg_cost_from_layers(used, apply=True)
+    used.refresh_from_db()
+    assert result["status"] == "synced"
+    assert result["after"] == used.avg_cost == Decimal("0.0000")
+
+
+def test_sale_after_sync_prices_provisional_layer_at_kept_cost():
+    tenant = _tenant("مزامنة-بيع")
+    product = _product(tenant, "SYNC-SALE", "0", "95")
+    sync_avg_cost_from_layers(product, apply=True)
+    product.refresh_from_db()
+    record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("2"),
+        movement_date="2026-07-01", tenant=tenant,
+    )
+    layer = StockLayer.objects.get(product=product, is_provisional=True)
+    assert layer.unit_cost == Decimal("95.0000")
