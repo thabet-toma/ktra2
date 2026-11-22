@@ -4,7 +4,7 @@ from django.core.exceptions import ValidationError
 from django.db.models.functions import Coalesce
 
 from .models import (
-    COGS_METHOD_FIFO, COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD, StockLayer,
+    COGS_METHOD_AVCO, COGS_METHOD_FIFO, COGS_METHOD_LAST_PURCHASE, COGS_METHOD_STANDARD, StockLayer,
     StockMovement,
 )
 
@@ -103,10 +103,10 @@ def method_unit_cost(*, product, method, as_of):
 def apply_sale_cogs_snapshot(movement, *, method):
     price = method_unit_cost(product=movement.product, method=method, as_of=movement.movement_date)
     if price is None:
-        # avco وأيُّ طريقةٍ غير معروفة تُعامَل fifo حتى M5، وهو أيضاً السقوط لـ standard
-        # بلا standard_cost ولـ last_purchase بلا شراء سابق (التحذير يرفعه المستدعي).
+        # يستخدم AVCO قيمة الطبقات المستهلكة؛ وعند غياب السعر الثابت أو جهل الطريقة يُستخدم FIFO.
+        # يرفع المستدعي التحذير عند غياب التكلفة المعيارية أو شراء سابق.
         movement.cogs_cost = movement.total_cost
-        movement.cogs_method = COGS_METHOD_FIFO
+        movement.cogs_method = COGS_METHOD_AVCO if method == COGS_METHOD_AVCO else COGS_METHOD_FIFO
     else:
         movement.cogs_cost = (movement.quantity * price).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
         movement.cogs_method = method

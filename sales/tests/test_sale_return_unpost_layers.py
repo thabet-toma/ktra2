@@ -5,13 +5,14 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from rest_framework.test import APIClient
 
+from accounting.models import JournalHeader
 from inventory import fifo
 from inventory.models import Product, StockLayer, StockLayerConsumption, StockLayerRestoration, StockMovement
 from inventory.services import record_stock_movement, reverse_stock_movements
 from sales.models import SalesInvoice, SalesInvoiceLine
 from sales.services import post_sales_invoice
 from sales.tests.test_cogs_variance_journal import setup_case
-from sales.tests.test_sale_return_restores_its_layers import D, env, _return, _sell
+from sales.tests.test_sale_return_restores_its_layers import D, env, _return, _sell, _remaining
 
 pytestmark = pytest.mark.django_db
 
@@ -217,3 +218,39 @@ def test_k_two_return_lines_merge_recreated_consumption(env):
     assert list(StockLayerConsumption.objects.filter(movement=origin, layer__unit_cost=16).values_list('quantity', 'unit_cost')) == [(Decimal('2'), Decimal('16'))]
     assert repost(tenant, ret).status_code == 200
     assert list(StockMovement.objects.filter(tenant=tenant, product=product, reference_id=ret.pk, movement_type='RETURN_IN').order_by('id').values_list('total_cost', flat=True)) == costs
+
+
+@pytest.mark.parametrize('method,expected,remaining', [
+    ('avco', Decimal('120'), [Decimal('1.3334'), Decimal('0.6666')]),
+    ('fifo', Decimal('112'), [Decimal('0'), Decimal('2')]),
+])
+def test_avco_unpost_and_repost_current_method(env, method, expected, remaining):
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+    tenant, cur, customer, product, ss = setup_purchase_case(env, 'avco')
+    sale = _sell(tenant, cur, customer, product, 10, 'AVCO-REPOST')
+    old = StockMovement.objects.get(tenant=tenant, product=product, reference_id=sale.pk, movement_type='OUT')
+    assert (old.total_cost, old.cogs_method) == (Decimal('120'), 'avco')
+    journal = sale.journal
+    response = unpost(tenant, sale)
+    assert response.status_code == 200, response.content
+    assert _remaining(tenant, product) == [Decimal('8'), Decimal('4')]
+    assert not JournalHeader.objects.filter(pk=journal.pk).exists()
+    ss.cogs_cost_method = method
+    ss.save(update_fields=['cogs_cost_method'])
+    response = repost(tenant, sale)
+    assert response.status_code == 200, response.content
+    mv = StockMovement.objects.get(tenant=tenant, product=product, reference_id=sale.pk, movement_type='OUT')
+    assert (mv.total_cost, mv.cogs_cost, mv.cogs_method) == (expected, expected, method)
+    assert _remaining(tenant, product) == remaining
+
+
+def test_avco_return_unpost_restores_post_sale_layers(env):
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+    tenant, cur, customer, product, _ = setup_purchase_case(env, 'avco')
+    sale = _sell(tenant, cur, customer, product, 10, 'AVCO-UNPOST-S')
+    assert _remaining(tenant, product) == [Decimal('1.3334'), Decimal('0.6666')]
+    ret = _return(tenant, cur, customer, product, 4, 'AVCO-UNPOST-R', sale)
+    assert _remaining(tenant, product) == [Decimal('4'), Decimal('2')]
+    response = unpost(tenant, ret)
+    assert response.status_code == 200, response.content
+    assert _remaining(tenant, product) == [Decimal('1.3334'), Decimal('0.6666')]

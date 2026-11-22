@@ -19,6 +19,7 @@
   8. عزل الشركات في `restores_movement`: تمرير حركة من شركة أخرى ⟵ `ValidationError`.
   9. قياس الأداء: فاتورة من 50 بنداً (50 نداءً لـ`record_stock_movement`) —
      سقف استعلامات مقيسٌ فعلياً (انظر التعليق أعلى الاختبار).
+  10. قياس أداء فاتورة من 50 بنداً بطريقة AVCO تحت سقف FIFO نفسه.
 """
 from decimal import Decimal
 
@@ -29,6 +30,9 @@ from django.core.exceptions import ValidationError
 from inventory.models import Product, StockLayer, StockLayerConsumption, StockMovement
 from inventory.services import record_stock_movement, reverse_stock_movements
 from tenants.services import create_company
+
+# القياس 650 استعلاماً مع هامش 5٪.
+FIFTY_LINE_QUERY_BUDGET = 683
 
 pytestmark = pytest.mark.django_db
 
@@ -282,8 +286,9 @@ def test_fifty_line_invoice_stays_within_measured_query_budget(django_assert_num
     INSERT الحركة، UPDATE الطبقة، INSERT صفّ الاستهلاك، استعلاما
     `derived_avg_cost` (قيمة+كمية)، UPDATE الحركة، UPDATE المنتج، + عمليات
     SAVEPOINT/RELEASE لتداخل `transaction.atomic()` في `fifo.consume`).
-    الحدّ أدناه 650 + هامش 5% ليتحمّل فروقاً طفيفة بين إصدارات Django/SQLite
-    بلا أن يُخفي انحرافاً حقيقياً (N+1 مثلاً كان سيُظهر رقماً أعلى بكثير).
+    السقف هو الثابت `FIFTY_LINE_QUERY_BUDGET` (650 المقيسة + هامش 5%) ليتحمّل
+    فروقاً طفيفة بين إصدارات Django/SQLite بلا أن يُخفي انحرافاً حقيقياً
+    (N+1 مثلاً كان سيُظهر رقماً أعلى بكثير).
     لا تحسين مسبق للتجميع — هذا قياسٌ لا تصميم.
     """
     tenant = _make_tenant("أداء RSM")
@@ -297,10 +302,38 @@ def test_fifty_line_invoice_stays_within_measured_query_budget(django_assert_num
 
     fresh_products = list(Product.objects.filter(pk__in=[p.pk for p in products]))
 
-    with django_assert_num_queries(683, exact=False):
+    with django_assert_num_queries(FIFTY_LINE_QUERY_BUDGET, exact=False):
         for p in fresh_products:
             record_stock_movement(
                 product=p, movement_type="OUT", quantity=Decimal("1"),
                 movement_date="2026-01-02", tenant=tenant,
                 reference_type="SALE", reference_id=1,
             )
+
+
+def test_fifty_line_avco_invoice_stays_within_measured_query_budget(django_assert_num_queries):
+    """قيس مسار AVCO عند 650 استعلاماً مثل FIFO، مع هامش 5٪."""
+    from sales.models import SalesSettings
+
+    tenant = _make_tenant('AVCO query budget')
+    SalesSettings.objects.update_or_create(tenant=tenant, defaults={'cogs_cost_method': 'avco'})
+    products = [_make_product(tenant, f'AVCO-PERF-{i}') for i in range(50)]
+    for p in products:
+        record_stock_movement(
+            product=p, movement_type='IN', quantity=Decimal('10'), unit_cost=Decimal('5'),
+            movement_date='2026-01-01', tenant=tenant,
+        )
+        record_stock_movement(
+            product=p, movement_type='IN', quantity=Decimal('10'), unit_cost=Decimal('9'),
+            movement_date='2026-01-01', tenant=tenant,
+        )
+    fresh_products = list(Product.objects.filter(tenant=tenant, pk__in=[p.pk for p in products]))
+    movements = []
+    with django_assert_num_queries(FIFTY_LINE_QUERY_BUDGET, exact=False):
+        for p in fresh_products:
+            movements.append(record_stock_movement(
+                product=p, movement_type='OUT', quantity=Decimal('1'), movement_date='2026-01-02',
+                tenant=tenant, reference_type='SALE', reference_id=1,
+            ))
+    assert len(movements) == 50
+    assert all(movement.cogs_method == 'avco' for movement in movements)

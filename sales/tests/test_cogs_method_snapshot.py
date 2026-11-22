@@ -10,7 +10,7 @@ from inventory.tests.test_unpost_provisional_reconciliation import _receive
 from logistics.tests.test_accrual_adjust import D as LD, _AccrualAdjustBase
 from sales.models import SalesInvoice, SalesSettings
 from sales.services import post_sales_invoice
-from sales.tests.test_sale_return_restores_its_layers import D, env, _return, _sell
+from sales.tests.test_sale_return_restores_its_layers import D, env, _return, _sell, _remaining
 from sales.tests.test_sale_return_unpost_layers import client_for
 
 pytestmark = pytest.mark.django_db
@@ -185,6 +185,9 @@ def test_other_outbound_movements_have_no_snapshot(env):
         lines=[{'product_id': product.id, 'quantity': 1}])
     movement = StockMovement.objects.get(reference_type='DELIVERY_NOTE', reference_id=delivery.id)
     assert adjustment.cogs_cost is None and movement.cogs_cost is None
+    adjustment.refresh_from_db()
+    assert adjustment.cogs_method is None and movement.cogs_method is None
+    assert _remaining(tenant, product) == [Decimal('6'), Decimal('4')]
 
 
 def test_linked_delivery_snapshot(env):
@@ -318,14 +321,14 @@ def test_payment_voucher_post_returns_warning(env):
     }]
 
 
-def test_avco_is_fifo_without_warning(env):
+def test_avco_snapshot_without_warning(env):
     tenant, cur, customer, product, ss = setup_purchase_case(env, 'avco', Decimal('11'))
     invoice = SalesInvoice.objects.create(tenant=tenant, invoice_number='AVCO', customer=customer,
         currency=cur, invoice_date=D, invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=True)
     invoice.lines.create(tenant=tenant, product=product, quantity=10, unit_price=200)
     post_sales_invoice(invoice)
     movement = StockMovement.objects.get(reference_type='SALE', reference_id=invoice.id)
-    assert movement.cogs_method == 'fifo'
+    assert movement.cogs_method == 'avco'
     assert movement.cogs_cost == movement.total_cost
     assert not getattr(invoice, '_cogs_warnings', None)
 
@@ -447,3 +450,37 @@ class LandedRevaluationSnapshotSyncTest(_AccrualAdjustBase):
         cogs_acct = _resolve_line_account(self.product, 'cogs', tenant_id=self.tenant.TenantID)
         self.assertTrue(JournalLine.objects.filter(journal=journal, account=variance, debit=LD('120.00')).exists())
         self.assertFalse(JournalLine.objects.filter(journal=journal, account=cogs_acct).exists())
+
+
+def test_avco_sale_acceptance(env):
+    from inventory import fifo
+
+    tenant, cur, customer, product, ss = setup_purchase_case(env, 'avco')
+    sale = _sell(tenant, cur, customer, product, 10, 'AVCO-ACCEPT')
+    mv = StockMovement.objects.get(tenant=tenant, reference_type='SALE', reference_id=sale.id)
+    assert (mv.total_cost, mv.cogs_cost, mv.cogs_method) == (Decimal('120'), Decimal('120'), 'avco')
+    layers = list(
+        StockLayer.objects.filter(tenant=tenant, product=product)
+        .order_by('layer_date', 'id').values_list('remaining_qty', 'unit_cost')
+    )
+    assert layers == [(Decimal('1.3334'), Decimal('10')), (Decimal('0.6666'), Decimal('16'))]
+    rows = list(JournalLine.objects.filter(journal_id=sale.journal_id))
+    assert sum(r.debit for r in rows if r.account_id == ss.default_cogs_account_id) == Decimal('120')
+    assert sum(r.credit for r in rows if r.account_id == ss.default_inventory_account_id) == Decimal('120')
+    assert not any(r.account_id == ss.cost_variance_account_id for r in rows)
+    assert sum(r.debit for r in rows) == sum(r.credit for r in rows)
+    assert not fifo.layer_balance_gaps(tenant_id=tenant.pk, product_ids=[product.pk])
+    product.refresh_from_db()
+    assert product.avg_cost == fifo.derived_avg_cost(tenant_id=tenant.pk, product_id=product.pk)
+    # هذا فرق التقريب المقبول في D6 بين total_cost بمنزلتين والطبقات بأربع منازل.
+    assert abs(Decimal('144') - mv.total_cost - sum(q * c for q, c in layers)) < Decimal('0.01')
+
+
+def test_avco_other_outbound_persists_method(env):
+    tenant, _, _, product, _ = setup_purchase_case(env, 'avco')
+    mv = record_stock_movement(
+        product=product, movement_type='ADJUST_OUT', quantity=6, movement_date=D, tenant=tenant,
+    )
+    mv.refresh_from_db()
+    assert (mv.cogs_method, mv.cogs_cost) == ('avco', None)
+    assert _remaining(tenant, product) == [Decimal('4'), Decimal('2')]

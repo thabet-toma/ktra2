@@ -17,6 +17,7 @@ from .cogs_method import (
     cost_variance_account_id, is_sale_issue,
 )
 from .models import (
+    COGS_METHOD_AVCO, COGS_METHOD_FIFO,
     Product, ProductFamily, ProductMerge, ProductStorageLocation, StockLayer,
     StockLayerConsumption, StockLayerRestoration, StockMovement,
 )
@@ -854,11 +855,11 @@ def record_stock_movement(
     """
     Record a stock movement and update Product stock/cost atomically.
 
-    الكلفة FIFO لا WAC (مواصفة #137 المرحلة 2): كل حركةٍ واردة (IN/ADJUST_IN/
+    الكلفة من طبقات المخزون (مواصفة #137 وM5-2): كل حركةٍ واردة (IN/ADJUST_IN/
     RETURN_IN) تُنشئ طبقة كلفة (`inventory.fifo.create_layer`) بسعرها الفعلي؛
     وكل حركةٍ صادرة (OUT/ADJUST_OUT/RETURN_OUT) تستهلك الطبقات المفتوحة
-    بترتيب الورود (`inventory.fifo.consume`) فتحمل كلفة كل جزءٍ سعر طبقته
-    الفعلي — لا متوسطاً مذاباً. `Product.avg_cost` صار رقماً **مشتقّاً**
+    تناسبياً في AVCO وبترتيب الورود في غيره (`inventory.fifo.consume`) فتحمل
+    كلفة كل جزءٍ سعر طبقته الفعلي. `Product.avg_cost` صار رقماً **مشتقّاً**
     (`inventory.fifo.derived_avg_cost`: قيمة الطبقات المفتوحة ÷ كميّتها)
     للعرض فقط، لا مصدر كلفةٍ يُبنى عليه أي احتساب.
 
@@ -870,11 +871,12 @@ def record_stock_movement(
     هذا يعالج فقط ما يتجاوزه أصلاً.
 
     `restores_movement`: مرّرها مع حركةٍ واردة (مرتجع بيعٍ يشير إلى حركة
-    الصرف الأصلية) لإرجاع البضاعة إلى *نفس* طبقتها وموقعها في رتل FIFO
-    (`inventory.fifo.restore`) بدل إنشاء طبقة جديدة في آخر الرتل — فتُشتقّ
-    `unit_cost`/`total_cost` من كلفة الاستهلاك المستعاد فعلاً. يجب أن تكون
-    من نفس الشركة ونفس المنتج، وإلا `ValidationError`. إن لم يكن لها صفوف
-    استهلاك (استُعيدت من قبل) تتصرّف الدالة كحركةٍ واردةٍ عاديّة.
+    الصرف الأصلية) لاستعادة الاستهلاك عبر `inventory/fifo.py` (`restore_partial`):
+    يُفكّ استهلاك أصل FIFO بعكس ترتيبه إلى طبقاته، ويُستعاد استهلاك أصل AVCO
+    تناسبياً عبر طبقاته. تُشتقّ `unit_cost`/`total_cost` من كلفة الاستهلاك
+    المستعاد فعلاً. يجب أن تكون من نفس الشركة ونفس المنتج، وإلا
+    `ValidationError`. إن لم يكن لها صفوف استهلاك (استُعيدت من قبل) تتصرّف
+    الدالة كحركةٍ واردةٍ عاديّة.
     """
     quantity = Decimal(str(quantity))
     unit_cost = Decimal(str(unit_cost))
@@ -887,14 +889,17 @@ def record_stock_movement(
         raise ValidationError(f"نوع الحركة غير صالح: {movement_type}")
 
     sale_issue = is_sale_issue(movement_type, reference_type)
+    is_outbound = movement_type in OUTBOUND_TYPES
     with transaction.atomic():
         products = Product.objects.select_for_update()
-        if sale_issue:
+        if is_outbound:
             from sales.models import SalesSettings
-            products = products.annotate(_sale_cogs_method=Subquery(
+            products = products.annotate(_outbound_cogs_method=Subquery(
                 SalesSettings.objects.filter(tenant_id=OuterRef('tenant_id')).values('cogs_cost_method')[:1]
             ))
         prod = products.get(pk=product.pk)
+        outbound_method = prod._outbound_cogs_method if is_outbound else None
+        is_avco = outbound_method == COGS_METHOD_AVCO
 
         qty_before = Decimal(str(prod.quantity_on_hand))
         avg_before = Decimal(str(prod.avg_cost))
@@ -985,9 +990,10 @@ def record_stock_movement(
         )
 
         if movement_type in INBOUND_TYPES:
-            # مرتجعٌ يشير إلى صرفه الأصليّ: يُفكّ من استهلاكه **بمقدار الكميّة
-            # الراجعة وحدها** وبعكس ترتيب الاستهلاك، فتعود البضاعة إلى طبقاتها
-            # ومواقعِها. والراجعُ الزائد عمّا استُهلك (مرتجعٌ أكبر من البيعة)
+            # مرتجعٌ يشير إلى صرفه الأصليّ: يُستعاد **بمقدار الكميّة الراجعة
+            # وحدها** — استهلاكُ أصل FIFO يُفكّ بعكس ترتيب الاستهلاك فتعود
+            # البضاعة إلى طبقاتها، واستهلاكُ أصل AVCO يُستعاد تناسبياً عبر
+            # طبقاته. والراجعُ الزائد عمّا استُهلك (مرتجعٌ أكبر من البيعة)
             # يسقط إلى المسار العاديّ أدناه بطبقةٍ جديدةٍ للفائض وحده.
             restored = (
                 fifo.restore_partial(movements=restore_sources, quantity=quantity, restored_by=movement)
@@ -1053,7 +1059,8 @@ def record_stock_movement(
                         details=reconcile_result.details,
                     )
         else:
-            result = fifo.consume(movement=movement, quantity=quantity)
+            consume_method = COGS_METHOD_AVCO if is_avco else COGS_METHOD_FIFO
+            result = fifo.consume(movement=movement, quantity=quantity, method=consume_method)
             total_consumed_cost = result.cost
             if result.uncovered_qty > 0:
                 # آخر كلفة معروفة: avg_before إن كان > 0، وإلا كلفة وحدة آخر
@@ -1066,7 +1073,7 @@ def record_stock_movement(
                     movement=movement, quantity=result.uncovered_qty,
                     unit_cost=last_known_cost, provisional=True,
                 )
-                extra = fifo.consume(movement=movement, quantity=result.uncovered_qty)
+                extra = fifo.consume(movement=movement, quantity=result.uncovered_qty, method=consume_method)
                 total_consumed_cost += extra.cost
                 logger.warning(
                     "NEGATIVE STOCK ALLOWED: product=%s sku=%s — طبقة مؤقّتة (is_provisional) "
@@ -1085,10 +1092,14 @@ def record_stock_movement(
         movement.total_cost = total_cost
         movement.avg_cost_after = new_avg.quantize(Decimal('0.0001'))
         if sale_issue:
-            apply_sale_cogs_snapshot(movement, method=prod._sale_cogs_method)
+            apply_sale_cogs_snapshot(movement, method=outbound_method)
+        elif is_avco:
+            movement.cogs_method = COGS_METHOD_AVCO
         update_fields = ['unit_cost', 'total_cost', 'avg_cost_after']
         if movement.cogs_cost is not None:
-            update_fields += ['cogs_cost', 'cogs_method']
+            update_fields.append('cogs_cost')
+        if movement.cogs_method is not None:
+            update_fields.append('cogs_method')
         movement.save(update_fields=update_fields)
 
         prod.quantity_on_hand = new_qty

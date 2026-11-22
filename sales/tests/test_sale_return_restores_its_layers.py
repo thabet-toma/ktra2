@@ -93,6 +93,14 @@ def _return(tenant, ils, customer, product, qty, number, original):
     return ret
 
 
+def _remaining(tenant, product):
+    """الكميات المتبقية لطبقات المنتج مرتبة حسب layer_date ثم id."""
+    return list(
+        StockLayer.objects.filter(tenant=tenant, product=product)
+        .order_by('layer_date', 'id').values_list('remaining_qty', flat=True)
+    )
+
+
 def _layers(product):
     return {
         layer.unit_cost: layer.remaining_qty
@@ -213,3 +221,23 @@ def test_restore_partial_reports_each_origin(env):
         movements[0].id: (Decimal('1'), Decimal('10')),
         movements[1].id: (Decimal('3'), Decimal('30')),
     }
+
+
+def test_avco_partial_and_full_return(env):
+    """رد 4 يعيد 2.6666 بسعر 10 و1.3334 بسعر 16، أي 48.0004 تُقرّب إلى 48.00."""
+    from accounting.models import JournalLine
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+    tenant, cur, customer, product, ss = setup_purchase_case(env, 'avco')
+    sale = _sell(tenant, cur, customer, product, 10, 'AVCO-RET-S')
+    ret = _return(tenant, cur, customer, product, 4, 'AVCO-RET-4', sale)
+    mv = StockMovement.objects.get(tenant=tenant, product=product, reference_id=ret.pk, movement_type='RETURN_IN')
+    assert mv.total_cost == Decimal('48.00')
+    assert _layers(product) == {Decimal('10'): Decimal('4'), Decimal('16'): Decimal('2')}
+    rows = list(JournalLine.objects.filter(journal_id=ret.journal_id))
+    assert sum(r.debit for r in rows if r.account_id == ss.default_inventory_account_id) == mv.total_cost
+    assert sum(r.credit for r in rows if r.account_id == ss.default_cogs_account_id) == mv.total_cost
+    assert not any(r.account_id == ss.cost_variance_account_id for r in rows)
+    second = _return(tenant, cur, customer, product, 6, 'AVCO-RET-6', sale)
+    mv2 = StockMovement.objects.get(tenant=tenant, product=product, reference_id=second.pk, movement_type='RETURN_IN')
+    assert _layers(product) == {Decimal('10'): Decimal('8'), Decimal('16'): Decimal('4')}
+    assert mv.total_cost + mv2.total_cost == Decimal('120')

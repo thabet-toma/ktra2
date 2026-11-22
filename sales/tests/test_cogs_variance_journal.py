@@ -12,7 +12,7 @@ from inventory.services import _fixed_cogs_reversal, record_stock_movement
 from sales.models import SalesInvoice, SalesSettings
 from sales.services import deliver_invoice_lines, post_sales_invoice, sales_cogs_map
 from sales.services.calc import _build_cogs_journal_line_dicts
-from sales.tests.test_sale_return_restores_its_layers import env, _sell, _return, D
+from sales.tests.test_sale_return_restores_its_layers import env, _sell, _return, D, _remaining
 
 pytestmark = pytest.mark.django_db
 
@@ -211,3 +211,60 @@ def test_fixed_reversal_rounds_restored_value_like_total(env):
     restored = fifo.restore_partial(movements=[origin], quantity=Decimal('1.5'))
     assert restored.cost == Decimal('1.2350')
     assert _fixed_cogs_reversal(restored, [origin], Decimal('1.24')) == (Decimal('1.50'), 'standard')
+
+
+def test_return_mixed_standard_and_avco_origins(env):
+    """بيع 6 معياري ثم 3 بمتوسط 42؛ رد 4 بكلفة 52 ولقطة 53 وفارق 1 وطبقات 3، 4."""
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+
+    tenant, cur, customer, product, ss = setup_purchase_case(env, 'standard', Decimal('11'))
+    first = _sell(tenant, cur, customer, product, 6, 'MIX-AVCO-S1')
+    ss.cogs_cost_method = 'avco'
+    ss.save(update_fields=['cogs_cost_method'])
+    second = _sell(tenant, cur, customer, product, 3, 'MIX-AVCO-S2')
+    origins = list(StockMovement.objects.filter(
+        tenant=tenant, product=product, reference_type='SALE', reference_id__in=[first.pk, second.pk],
+    ).order_by('id'))
+    assert [m.cogs_method for m in origins] == ['standard', 'avco']
+    assert (origins[1].total_cost, origins[1].cogs_cost, origins[1].cogs_method) == (
+        Decimal('42'), Decimal('42'), 'avco',
+    )
+    mv = record_stock_movement(
+        product=product, movement_type='RETURN_IN', quantity=4, movement_date=D,
+        tenant=tenant, restores_movement=origins,
+    )
+    assert (mv.total_cost, mv.cogs_cost, mv.cogs_method) == (Decimal('52'), Decimal('53'), None)
+    assert _remaining(tenant, product) == [Decimal('3'), Decimal('4')]
+
+
+def test_mixed_standard_avco_linked_return_journal(env):
+    """بيع 6 معياري ثم 3 بمتوسط 42؛ رد 4 بقيد مخزون 52 وتكلفة 53 وفارق 1 وطبقات 3، 4."""
+    from sales.tests.test_cogs_method_snapshot import setup_purchase_case
+
+    tenant, cur, customer, product, ss = setup_purchase_case(env, 'standard', Decimal('11'))
+    sale = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number='MIX-LINK-S', customer=customer, currency=cur, invoice_date=D,
+        invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=False,
+    )
+    line = sale.lines.create(tenant=tenant, product=product, quantity=9, unit_price=200)
+    post_sales_invoice(sale)
+    deliver_invoice_lines(sale, lines=[{'line_id': line.id, 'quantity': 6}])
+    ss.cogs_cost_method = 'avco'
+    ss.save(update_fields=['cogs_cost_method'])
+    deliver_invoice_lines(sale, lines=[{'line_id': line.id, 'quantity': 3}])
+    origins = list(StockMovement.objects.filter(
+        tenant=tenant, product=product, reference_type='SALE', reference_id=sale.pk,
+    ).order_by('id'))
+    assert (origins[1].total_cost, origins[1].cogs_cost, origins[1].cogs_method) == (
+        Decimal('42'), Decimal('42'), 'avco',
+    )
+    ret = _return(tenant, cur, customer, product, 4, 'MIX-LINK-R', sale)
+    mv = StockMovement.objects.get(tenant=tenant, product=product, reference_id=ret.pk, movement_type='RETURN_IN')
+    assert (mv.total_cost, mv.cogs_cost) == (Decimal('52'), Decimal('53'))
+    assert _remaining(tenant, product) == [Decimal('3'), Decimal('4')]
+    rows = {r.account_id: (r.debit, r.credit) for r in JournalLine.objects.filter(
+        tenant=tenant, journal_id=ret.journal_id,
+    )}
+    assert rows[ss.default_inventory_account_id] == (Decimal('52'), 0)
+    assert rows[ss.default_cogs_account_id] == (0, Decimal('53'))
+    assert rows[ss.cost_variance_account_id] == (Decimal('1'), 0)
