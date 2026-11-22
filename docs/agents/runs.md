@@ -316,3 +316,10 @@
 | 2026-11-22 | SYNC-NOLAYER fix2 | gpt-6.1-terra high (codex-delegate) | وصفان فقط: شرط الكلفة السابقة غير الصفرية؛ 8 passed | قصير |
 | 2026-11-22 | SYNC-NOLAYER مراجعة الحالة النهائية | Opus ×2 (Standards/Spec) | كلاهما CLEAN؛ nits شكلية مرفوضة (لا أثر سلوكي) | ~3 دقائق لكلٍّ |
 | 2026-11-22 | SYNC-NOLAYER نشر + `--apply` على الإنتاج | المنسّق (Opus 5.5) | CI أخضر ← دمج `9d840ca4` ← معاينة ← apply (45) ← تحقّق قراءةً نظيف (لقطة قبل/بعد + فحص كلفة آخر طبقة للمصفَّرة) | ~10 دقائق |
+| 2026-11-22 | RECOMPUTE-NOLAYER منفّذ | gpt-6.1-terra high (codex-delegate) | مكتمل | `briefs/RECOMPUTE-NOLAYER-impl.txt` ← مساعد `_keeps_cost_without_layers` يستعمله `_recompute_product_stock` و`sync_avg_cost_from_layers`، واختبارات T1–T4؛ قُرئ الفرق كاملاً |
+| 2026-11-22 | RECOMPUTE-NOLAYER مراجعات r1–r5 | Opus ×2 (Standards/Spec) | Standards r1 تعلّق وأُعيد؛ r1–r4 ملاحظات دقّة (وثائق وصفت سلوكاً استُبدل، تسمية الاختبارات، قرار عكس المستند الوحيد = الخيار أ)، r5 شكليات | ~3–10د لكلٍّ |
+| 2026-11-22 | RECOMPUTE-NOLAYER تصليحات 1–6 | Terra (1–2)، Sonnet high (3)، Opus high (4–6) | مكتملة؛ 5–6 شكلية بحتة ← قاعدة المالك: الشكليات تُدمج في آخر جولة جوهرية أو تُسقط | قصيرة |
+| 2026-11-22 | RECOMPUTE-NOLAYER r6 + البوّابة | Opus ×2 + المنسّق | r6 CLEAN×2؛ البوّابة الكاملة 7 failed: الستة البيئية + `test_shipment_unpost_zeros_avg_cost_when_no_open_layers` (M0 يرمّز السلوك المستبدَل) | 1:01:53 |
+| 2026-11-22 | RECOMPUTE-NOLAYER تصليح 7 | Opus high | اختبار logistics أُعيدت كتابته `test_shipment_unpost_keeps_receipt_cost_when_no_layer_remains` (لا طبقة تبقى، avg_cost=600)، أُثبت سقوطه `0.0000 != 600.0000` | قصير |
+| 2026-11-22 | RECOMPUTE-NOLAYER r7 + البوّابة + الإيداع | Opus ×2 + المنسّق | r7 CLEAN×2 (شكليات C1–C4 وpointer مرفوضة)؛ البوّابة 6 failed البيئية + 8146 passed؛ الهجرات No changes؛ إيداع `ec6e2757` ودفع | 0:44:37 |
+| 2026-11-22 | RECOMPUTE-NOLAYER نشر | المنسّق (Opus 5.5) | CI أخضر (backend/frontend/pwa-audit) ← دمج `origin/newktra` في `modern` (`33d0ec44`) بلا تعارض ولا هجرة، check نظيف، active، NRestarts=0، health محلي/عام والجذر 200، سجل gunicorn نظيف، نقاط الوكيل تردّ تحقّقاً (400) بلا 500 | ~5 دقائق |
