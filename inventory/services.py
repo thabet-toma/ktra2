@@ -2805,8 +2805,7 @@ def _next_stocktake_number(tenant_id):
 
 
 def post_warehouse_transfer(transfer, user=None):
-    """T-I1: يرحّل تحويلاً بين مستودعين — صرف من المصدر + استلام في الوجهة بالتكلفة
-    المتوسطة. صافي الأثر على إجمالي المخزون/المتوسط = صفر (نقل موقعي). لا قيد محاسبي."""
+    """T-I1: يرحّل تحويلاً بين مستودعين — استلام الوجهة بكلفة صرف المصدر. لا قيد محاسبي."""
     from .models import WarehouseTransfer
     if transfer.is_posted:
         raise ValidationError("التحويل مُرحَّل مسبقاً.")
@@ -2822,9 +2821,7 @@ def post_warehouse_transfer(transfer, user=None):
                 transfer.tenant_id, WarehouseTransfer, 'transfer_number', 'TRF')
         for ln in lines:
             prod = ln.product
-            # نلتقط التكلفة المتوسطة الحالية لاستخدامها في الاستلام (نقل بالتكلفة).
-            avg = Decimal(str(prod.avg_cost))
-            record_stock_movement(
+            out_movement = record_stock_movement(
                 product=prod, movement_type='OUT', quantity=ln.quantity,
                 reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
                 movement_date=transfer.transfer_date, tenant=transfer.tenant,
@@ -2832,7 +2829,8 @@ def post_warehouse_transfer(transfer, user=None):
                 notes=f"تحويل إلى {transfer.dest_warehouse.name}",
             )
             record_stock_movement(
-                product=prod, movement_type='IN', quantity=ln.quantity, unit_cost=avg,
+                product=prod, movement_type='IN', quantity=ln.quantity,
+                unit_cost=out_movement.unit_cost,
                 reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
                 movement_date=transfer.transfer_date, tenant=transfer.tenant,
                 warehouse=transfer.dest_warehouse,
@@ -2845,22 +2843,22 @@ def post_warehouse_transfer(transfer, user=None):
 
 
 def unpost_warehouse_transfer(transfer, user=None):
-    """يعكس التحويل: استلام في المصدر + صرف من الوجهة بالتكلفة المتوسطة الحالية."""
+    """يعكس التحويل: استلام المصدر بكلفة صرف الوجهة، بلا قيد محاسبي."""
     if not transfer.is_posted:
         raise ValidationError("التحويل ليس مُرحَّلاً.")
     lines = list(transfer.lines.select_related('product').all())
     with transaction.atomic():
         for ln in lines:
             prod = ln.product
-            avg = Decimal(str(prod.avg_cost))
-            record_stock_movement(
+            out_movement = record_stock_movement(
                 product=prod, movement_type='OUT', quantity=ln.quantity,
                 reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
                 movement_date=transfer.transfer_date, tenant=transfer.tenant,
                 warehouse=transfer.dest_warehouse, notes="عكس تحويل",
             )
             record_stock_movement(
-                product=prod, movement_type='IN', quantity=ln.quantity, unit_cost=avg,
+                product=prod, movement_type='IN', quantity=ln.quantity,
+                unit_cost=out_movement.unit_cost,
                 reference_type='WAREHOUSE_TRANSFER', reference_id=transfer.id,
                 movement_date=transfer.transfer_date, tenant=transfer.tenant,
                 warehouse=transfer.source_warehouse, notes="عكس تحويل",

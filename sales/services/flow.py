@@ -1664,14 +1664,7 @@ def post_sales_invoice(
                 # بآخر كلفةِ شراء — فربحُ الفاتورة يصفّر عند المرتجع الكامل،
                 # وكلفةُ ما تبقّى تصير كما لو بيعت الكميّةُ الباقية ابتداءً.
                 # تُجلَب حركاتُ الأصل **دفعةً واحدة** لا استعلاماً لكلّ سطر.
-                origins_by_product: dict[int, list] = defaultdict(list)
-                if not is_purchase_return and invoice.original_invoice_id:
-                    for mv in StockMovement.objects.filter(
-                        tenant_id=invoice.tenant_id,
-                        reference_type__in=SALES_STOCK_REFERENCE_TYPES,
-                        reference_id=invoice.original_invoice_id,
-                    ):
-                        origins_by_product[mv.product_id].append(mv)
+                origins_by_product = _return_origins_by_product(invoice, mv_type)
                 for line in lines:
                     if getattr(line.product, "is_service", False):
                         continue
@@ -2409,6 +2402,19 @@ def next_delivery_number(tenant_id: int, branch=None) -> str:
     return f"DN-{seq:04d}"
 
 
+def _return_origins_by_product(invoice, movement_type) -> dict[int, list]:
+    """اجمع حركات البيع الأصلي حسب المنتج لاستعادة طبقات المرتجع المرتبط."""
+    origins = defaultdict(list)
+    if movement_type == "RETURN_IN" and invoice.original_invoice_id:
+        for movement in StockMovement.objects.filter(
+            tenant_id=invoice.tenant_id,
+            reference_type__in=SALES_STOCK_REFERENCE_TYPES,
+            reference_id=invoice.original_invoice_id,
+        ):
+            origins[movement.product_id].append(movement)
+    return origins
+
+
 def deliver_invoice_lines(
     invoice: SalesInvoice,
     *,
@@ -2518,6 +2524,7 @@ def deliver_invoice_lines(
         costs_by_product: dict[int, Decimal] = defaultdict(Decimal)
         cogs_by_product: dict[int, Decimal] = defaultdict(Decimal)
         stock_movements = []
+        origins_by_product = _return_origins_by_product(invoice, mv_type)
         for line_id, qty in delivered_now.items():
             line = lines_by_id[line_id]
             warehouse = warehouse_by_line.get(line_id)
@@ -2537,6 +2544,7 @@ def deliver_invoice_lines(
                     tenant=invoice.tenant,
                     branch=invoice.branch,
                     warehouse=warehouse,
+                    restores_movement=origins_by_product.get(line.product_id) or None,
                 )
             except ValidationError as e:
                 raise ValidationError(f"مخزون المنتج {line.product.sku}: {e}")
@@ -2813,7 +2821,7 @@ def void_delivery_note(delivery: DeliveryOrder, *, user=None) -> dict:
     """
     from accounting.models import JournalHeader
     from accounting.services import assert_dates_open_for_unpost
-    from inventory.services import _recompute_product_stock, _restore_outbound_layers
+    from inventory.services import _recompute_product_stock, _restore_outbound_layers, _undo_layer_restorations
 
     with transaction.atomic():
         lines = list(delivery.lines.select_related("invoice_line", "product", "movement"))
@@ -2830,8 +2838,9 @@ def void_delivery_note(delivery: DeliveryOrder, *, user=None) -> dict:
 
         unrestored = {}
         if movement_ids:
-            # الحذفُ يُسقط صفوفَ الاستهلاك بالتتالي ويترك الطبقاتِ مستهلَكة، فيعود
-            # الرصيدُ بلا كلفة — الردُّ إلى الطبقات قبل الحذف كـ`reverse_stock_movements`.
+            # اعكس استرداد المرتجع ثم أعد استهلاك الصادر إلى طبقاته قبل الحذف،
+            # كما في `reverse_stock_movements` وضمن المعاملة نفسها.
+            _undo_layer_restorations(tenant_id=delivery.tenant_id, movement_ids=movement_ids)
             unrestored = _restore_outbound_layers(
                 list({l.movement_id: l.movement for l in lines if l.movement_id}.values())
             )

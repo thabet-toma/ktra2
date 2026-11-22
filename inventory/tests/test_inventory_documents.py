@@ -14,7 +14,7 @@ from rest_framework.test import APITestCase
 from accounting.models import Account, FiscalPeriod, JournalHeader, JournalLine
 from core.models import ActivityLog
 from inventory.models import (
-    Product, ProductCategory, Warehouse, StockMovement,
+    Product, ProductCategory, Warehouse, StockMovement, StockLayer,
     WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
 )
 from inventory.services import (
@@ -42,6 +42,62 @@ class WarehouseTransferTest(TestCase):
         )
         WarehouseTransferLine.objects.create(transfer=t, product=self.product, quantity=Decimal(qty))
         return t
+
+    def _layered_stock(self, method="fifo"):
+        from sales.models import SalesSettings
+        # ألغِ رصيد setUpTestData المزروع بلا طبقات قبل إنشاء طبقات الاختبار.
+        Product.objects.filter(pk=self.product.pk).update(quantity_on_hand=0, avg_cost=0)
+        self.product.refresh_from_db()
+        SalesSettings.objects.update_or_create(tenant=self.tenant, defaults={"cogs_cost_method": method})
+        for qty, cost in [("8", "10"), ("4", "16")]:
+            record_stock_movement(
+                product=self.product, movement_type="IN", quantity=Decimal(qty),
+                unit_cost=Decimal(cost), movement_date="2026-06-01", tenant=self.tenant, warehouse=self.wh_a,
+            )
+
+    def _layer_value(self):
+        return sum((layer.remaining_qty * layer.unit_cost for layer in
+                    StockLayer.objects.filter(tenant=self.tenant, product=self.product)), Decimal("0"))
+
+    def _transfer_movements(self, transfer):
+        return list(StockMovement.objects.filter(tenant=self.tenant, reference_type="WAREHOUSE_TRANSFER",
+                    reference_id=transfer.id).order_by("id"))
+
+    def test_fifo_transfer_preserves_layer_value(self):
+        self._layered_stock()
+        transfer = self._make_transfer("10")
+        post_warehouse_transfer(transfer)
+        out, incoming = self._transfer_movements(transfer)
+        self.assertEqual(out.total_cost, Decimal("112"))
+        self.assertEqual(incoming.total_cost, out.total_cost)
+        self.assertEqual(self._layer_value(), Decimal("144"))
+
+    def test_avco_transfer_keeps_layer_value_within_rounding(self):
+        # حارس لمسار AVCO؛ اختبارات FIFO تثبت تقييم الوارد بكلفة الصادر.
+        self._layered_stock("avco")
+        transfer = self._make_transfer("10")
+        post_warehouse_transfer(transfer)
+        out, incoming = self._transfer_movements(transfer)
+        self.assertEqual(incoming.total_cost, out.total_cost)
+        self.assertLess(abs(self._layer_value() - Decimal("144")), Decimal("0.01"))
+
+    def test_unpost_transfer_preserves_layer_value(self):
+        self._layered_stock()
+        transfer = self._make_transfer("10")
+        post_warehouse_transfer(transfer)
+        unpost_warehouse_transfer(transfer)
+        _, _, out, incoming = self._transfer_movements(transfer)
+        self.assertEqual(incoming.total_cost, out.total_cost)
+        self.assertLess(abs(self._layer_value() - Decimal("144")), Decimal("0.01"))
+
+    def test_transfer_rounding_preserves_value_within_cent(self):
+        self._layered_stock()
+        transfer = self._make_transfer("9")
+        post_warehouse_transfer(transfer)
+        out, incoming = self._transfer_movements(transfer)
+        self.assertEqual(out.total_cost, Decimal("96"))
+        self.assertEqual(incoming.total_cost, out.total_cost)
+        self.assertLess(abs(self._layer_value() - Decimal("144")), Decimal("0.01"))
 
     def test_transfer_is_net_zero_on_company_totals(self):
         t = self._make_transfer("30")

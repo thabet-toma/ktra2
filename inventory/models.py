@@ -854,9 +854,9 @@ class ProductSerial(models.Model):
 class WarehouseTransfer(models.Model):
     """T-I1: مستند تحويل بضاعة بين مستودعين.
 
-    الترحيل = حركتا مخزون (صرف من المصدر + استلام في الوجهة) بالتكلفة المتوسطة،
-    فلا يتغيّر إجمالي المخزون أو متوسط التكلفة على مستوى الشركة — تنتقل البضاعة
-    بين المستودعين فقط. لا قيد محاسبي (لا أثر على قيمة المخزون).
+    الترحيل = حركتا مخزون: صرف من المصدر، واستلام في الوجهة بتكلفة الصرف الفعلية
+    (تكلفة الطبقات التي استهلكها الصرف). فتنتقل قيمة المخزون الإجمالية بين
+    المستودعين دون تغيّر (ضمن التقريب). لا قيد محاسبي.
     """
     id = models.AutoField(primary_key=True, db_column='TransferID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', related_name='warehouse_transfers')

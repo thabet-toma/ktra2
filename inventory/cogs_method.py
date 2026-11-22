@@ -54,7 +54,13 @@ def effective_cogs_expression():
 
 
 def sync_fifo_snapshot(movement):
-    if movement.cogs_method == COGS_METHOD_FIFO and movement.cogs_cost != movement.total_cost:
+    """زامن لقطات FIFO وبيوع AVCO؛ أبقِ cogs_cost غير البيعي في AVCO بقيمة NULL والطرق الثابتة دون تغيير."""
+    if movement.cogs_cost == movement.total_cost:
+        return False
+    if movement.cogs_method == COGS_METHOD_FIFO or (
+        movement.cogs_method == COGS_METHOD_AVCO
+        and is_sale_issue(movement.movement_type, movement.reference_type)
+    ):
         movement.cogs_cost = movement.total_cost
         return True
     return False

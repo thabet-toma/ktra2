@@ -206,6 +206,140 @@ def test_linked_delivery_snapshot(env):
     assert JournalLine.objects.filter(journal=delivery.journal, account=ss.cost_variance_account, debit=2).exists()
 
 
+def _linked_avco_delivery_return(env, sale_number, return_number):
+    from sales.services import deliver_invoice_lines
+
+    tenant, cur, customer, product = env
+    SalesSettings.objects.filter(tenant=tenant).update(cogs_cost_method='avco')
+    sale = SalesInvoice.objects.create(tenant=tenant, invoice_number=sale_number, customer=customer,
+        currency=cur, invoice_date=D, invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=False)
+    line = sale.lines.create(tenant=tenant, product=product, quantity=35, unit_price=200)
+    post_sales_invoice(sale)
+    sale.refresh_from_db()
+    deliver_invoice_lines(sale, lines=[{'line_id': line.id, 'quantity': 35}])
+    origin = StockMovement.objects.get(tenant=tenant, reference_type='SALE', reference_id=sale.id)
+    record_stock_movement(product=product, movement_type='IN', quantity=35, unit_cost=100,
+                          movement_date=D, tenant=tenant)
+    ret = SalesInvoice.objects.create(tenant=tenant, invoice_number=return_number, customer=customer,
+        currency=cur, invoice_date=D, invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=False,
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN, original_invoice=sale)
+    ret_line = ret.lines.create(tenant=tenant, product=product, quantity=35, unit_price=200)
+    post_sales_invoice(ret)
+    ret.refresh_from_db()
+    return ret, ret_line, origin
+
+
+def test_linked_avco_delivery_return_restores_origin_layers(env):
+    from sales.services import deliver_invoice_lines
+
+    tenant, _, _, product = env
+    ret, ret_line, origin = _linked_avco_delivery_return(env, 'AVCO-DEL-S', 'AVCO-DEL-R')
+    assert origin.total_cost == Decimal('850')
+    layers = list(StockLayer.objects.filter(tenant=tenant, product=product).order_by('id'))
+    for qty in (14, 21):
+        deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': qty}])
+    returns = StockMovement.objects.filter(tenant=tenant, reference_type='SALE', reference_id=ret.id)
+    assert list(returns.order_by('id').values_list('total_cost', flat=True)) == [Decimal('340'), Decimal('510')]
+    assert StockLayer.objects.filter(tenant=tenant, product=product).count() == 3
+    for layer, expected in zip(layers[:2], (Decimal('50'), Decimal('20'))):
+        layer.refresh_from_db()
+        assert layer.remaining_qty == expected
+
+
+def test_void_linked_avco_delivery_return_undoes_origin_restoration(env):
+    from django.db.models import Sum
+    from inventory.models import StockLayerConsumption
+    from sales.services import deliver_invoice_lines, void_delivery_note
+
+    tenant, _, _, product = env
+    ret, ret_line, origin = _linked_avco_delivery_return(env, 'AVCO-VOID-S', 'AVCO-VOID-R')
+    layers = list(StockLayer.objects.filter(tenant=tenant, product=product).order_by('id'))
+    before = [layer.remaining_qty for layer in layers]
+    consumed = StockLayerConsumption.objects.filter(movement=origin).aggregate(total=Sum('quantity'))['total']
+    assert consumed == Decimal('35')
+    product.refresh_from_db()
+    on_hand = product.quantity_on_hand
+
+    delivery = deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': 14}])
+    void_delivery_note(delivery)
+    for layer, expected in zip(layers, before):
+        layer.refresh_from_db()
+        assert layer.remaining_qty == expected
+    assert StockLayerConsumption.objects.filter(movement=origin).aggregate(total=Sum('quantity'))['total'] == consumed
+    product.refresh_from_db()
+    assert product.quantity_on_hand == on_hand
+    ret_line.refresh_from_db()
+    assert ret_line.delivered_quantity == 0
+
+    deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': 35}])
+    movement = StockMovement.objects.get(tenant=tenant, reference_type='SALE', reference_id=ret.id)
+    assert movement.total_cost == Decimal('850')
+    for layer, expected in zip(layers[:2], (Decimal('50'), Decimal('20'))):
+        layer.refresh_from_db()
+        assert layer.remaining_qty == expected
+
+
+def test_void_earlier_linked_avco_delivery_return_blocked_by_later(env):
+    from django.core.exceptions import ValidationError
+    from django.db.models import Sum
+    from inventory.models import StockLayerConsumption, StockLayerRestoration
+    from sales.services import deliver_invoice_lines, void_delivery_note
+
+    tenant, _, _, product = env
+    ret, ret_line, origin = _linked_avco_delivery_return(env, 'AVCO-BLOCK-S', 'AVCO-BLOCK-R')
+    first = deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': 14}])
+    deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': 21}])
+    movement_ids = list(first.lines.values_list('movement_id', flat=True))
+    restoration_ids = list(StockLayerRestoration.objects.filter(movement_id__in=movement_ids)
+                           .values_list('id', flat=True))
+    assert movement_ids and restoration_ids
+    layers = StockLayer.objects.filter(tenant=tenant, product=product).order_by('id')
+    before_layers = list(layers.values_list('id', 'remaining_qty'))
+    consumed = StockLayerConsumption.objects.filter(movement=origin).aggregate(total=Sum('quantity'))['total']
+    product.refresh_from_db()
+    on_hand = product.quantity_on_hand
+    ret_line.refresh_from_db()
+    delivered = ret_line.delivered_quantity
+
+    with pytest.raises(ValidationError, match='مرتجعٌ لاحق'):
+        void_delivery_note(first)
+
+    assert list(layers.values_list('id', 'remaining_qty')) == before_layers
+    assert StockLayerConsumption.objects.filter(movement=origin).aggregate(total=Sum('quantity'))['total'] == consumed
+    product.refresh_from_db()
+    assert product.quantity_on_hand == on_hand
+    ret_line.refresh_from_db()
+    assert ret_line.delivered_quantity == delivered
+    assert StockMovement.objects.filter(id__in=movement_ids).count() == len(movement_ids)
+    assert StockLayerRestoration.objects.filter(id__in=restoration_ids).count() == len(restoration_ids)
+
+
+def test_redeliver_latest_linked_avco_delivery_return_restores_cleanly(env):
+    from django.db.models import Sum
+    from inventory.models import StockLayerConsumption
+    from sales.services import deliver_invoice_lines, void_delivery_note
+
+    tenant, _, _, product = env
+    ret, ret_line, origin = _linked_avco_delivery_return(env, 'AVCO-EDIT-S', 'AVCO-EDIT-R')
+    layer_count = StockLayer.objects.filter(tenant=tenant, product=product).count()
+    deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': 14}])
+    latest = deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': 21}])
+    void_delivery_note(latest)
+    before = {row.layer_id: (row.quantity, row.unit_cost)
+              for row in StockLayerConsumption.objects.filter(movement=origin)}
+    new_delivery = deliver_invoice_lines(ret, lines=[{'line_id': ret_line.id, 'quantity': 20}])
+    after = {row.layer_id: row.quantity for row in StockLayerConsumption.objects.filter(movement=origin)}
+    restored_cost = sum((quantity - after.get(layer_id, Decimal('0'))) * cost
+                        for layer_id, (quantity, cost) in before.items())
+    movement = new_delivery.lines.get().movement
+    assert movement.movement_type == 'RETURN_IN'
+    assert movement.total_cost == restored_cost.quantize(Decimal('0.01')) == Decimal('485.72')
+    assert StockLayer.objects.filter(tenant=tenant, product=product).count() == layer_count
+    assert StockLayerConsumption.objects.filter(movement=origin).aggregate(total=Sum('quantity'))['total'] == 1
+    ret_line.refresh_from_db()
+    assert ret_line.delivered_quantity == 34
+
+
 def test_method_unit_cost_is_tenant_scoped_and_breaks_date_ties(env):
     from inventory.cogs_method import method_unit_cost
     from django.contrib.auth.models import User
@@ -365,6 +499,33 @@ def test_stock_issue_snapshot(env):
 
 
 class LandedRevaluationSnapshotSyncTest(_AccrualAdjustBase):
+    def test_landed_revaluation_syncs_avco_snapshot(self):
+        self._invoice()
+        record_stock_movement(product=self.product, movement_type='IN', quantity=10, unit_cost=100,
+                              movement_date='2026-07-10', tenant=self.tenant)
+        SalesSettings.objects.update_or_create(tenant=self.tenant, defaults={'cogs_cost_method': 'avco'})
+        sale = self._sell('8')
+        before = sale.total_cost
+        res = self._adjust_clearance(900)
+        self.assertEqual(res.status_code, 200, res.content)
+        sale.refresh_from_db()
+        self.assertEqual(sale.total_cost, before + LD('120.00'))
+        self.assertEqual(sale.total_cost, LD('3780.00'))
+        self.assertEqual(sale.cogs_cost, sale.total_cost)
+
+    def test_landed_revaluation_keeps_avco_non_sale_snapshot_null(self):
+        self._invoice()
+        SalesSettings.objects.update_or_create(tenant=self.tenant, defaults={'cogs_cost_method': 'avco'})
+        movement = record_stock_movement(product=self.product, movement_type='ADJUST_OUT', quantity=4,
+            movement_date='2026-07-20', tenant=self.tenant)
+        before = movement.total_cost
+        self.assertIsNone(movement.cogs_cost)
+        res = self._adjust_clearance(900)
+        self.assertEqual(res.status_code, 200, res.content)
+        movement.refresh_from_db()
+        self.assertEqual(movement.total_cost, before + LD('120.00'))
+        self.assertIsNone(movement.cogs_cost)
+
     def test_landed_revaluation_syncs_fifo_snapshot(self):
         self._invoice()
         sale = self._sell('4')

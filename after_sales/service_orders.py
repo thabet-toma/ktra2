@@ -926,8 +926,8 @@ def record_approval(order: ServiceOrder, *, user=None, note: str = "") -> Servic
 def post_covered_parts(order: ServiceOrder, *, user=None) -> dict:
     """يصرف القطع المغطاة من المخزن ويقيّد كلفتها مصروفَ كفالة.
 
-    التكلفة تاريخية بحقّ FIFO: `record_stock_movement` يستهلك أقدم طبقات
-    المنتج المفتوحة لحظة الصرف — لا متوسطاً يحرّكه شراء لاحق.
+    يستهلك `record_stock_movement` هذا الصرف حسب طريقة الشركة: الأقدم أولاً في
+    FIFO وstandard وlast_purchase، وتناسبياً في AVCO.
 
     كلفةٌ صفرية (طبقاتٌ بسعر صفر) تُسجَّل حركةً بلا قيد: البضاعة خرجت فعلاً
     فحركتها واجبة، والقيد الصفري مرفوض من `post_journal` أصلاً — لكنها تمرّ
