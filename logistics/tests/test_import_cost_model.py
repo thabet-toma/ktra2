@@ -3,7 +3,8 @@
 استلام الشحنة (`receive_shipment_stock`) وإلغاء ترحيلها يعكسان طبقات FIFO المفتوحة:
 - عند وجود طبقات مفتوحة (بما فيها بعد تسوية طبقة مؤقتة سالبة) يساوي `avg_cost`
   متوسط الطبقات المفتوحة (`derived_avg_cost`).
-- عند إفراغ المخزون إلى صفر (مثل إلغاء الترحيل) يصبح `avg_cost` صفراً.
+- عند إلغاء ترحيل الوارد الوحيد لا تبقى طبقة، فيبقى `avg_cost` على آخر كلفة
+  معروفة (`inventory/services.py` (`_keeps_cost_without_layers`)).
 """
 from decimal import Decimal
 
@@ -11,7 +12,7 @@ from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
 from accounting.services import create_fiscal_year
-from inventory.models import Product, StockMovement
+from inventory.models import Product, StockLayer, StockMovement
 from inventory.services import receive_shipment_stock, record_stock_movement
 from logistics.models import (
     LogisticsDeal,
@@ -97,12 +98,10 @@ class ImportCostModelTest(APITestCase):
         # متوسط الطبقة المفتوحة (10 @ 600 على رصيد 0) = 600
         self.assertEqual(self.product.avg_cost, D("600.0000"))
 
-    def test_shipment_unpost_zeros_avg_cost_when_no_open_layers(self):
-        """إلغاء ترحيل الشحنة يعكس المخزون ويصفّر avg_cost عند غياب طبقات مفتوحة (qoh=0)."""
+    def test_shipment_unpost_keeps_receipt_cost_when_no_layer_remains(self):
+        """إلغاء ترحيل الشحنة (الوارد الوحيد) يعكس المخزون ويُبقي avg_cost على landed الاستلام لأنه لا تبقى طبقة."""
         _, shipment, _ = self._make_flow()
         receive_shipment_stock(shipment)
-        # شوّه المتوسط عمداً لنتأكد أن unpost يعيده لمتوسط الطبقات المفتوحة (صفر عند qoh=0)
-        Product.objects.filter(pk=self.product.pk).update(avg_cost=D("999"))
 
         self.client.force_authenticate(user=self.user)
         res = self.client.post(
@@ -114,4 +113,6 @@ class ImportCostModelTest(APITestCase):
             reference_type="SHIPMENT", reference_id=shipment.pk).exists())
         self.product.refresh_from_db()
         self.assertEqual(self.product.quantity_on_hand, D("0.0000"))
-        self.assertEqual(self.product.avg_cost, D("0.0000"))
+        self.assertFalse(StockLayer.objects.filter(
+            tenant=self.tenant, product=self.product).exists())
+        self.assertEqual(self.product.avg_cost, D("600.0000"))

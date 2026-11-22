@@ -771,6 +771,17 @@ def _last_layer_unit_cost(*, tenant_id: int, product_id: int) -> Decimal:
     return Decimal(str(last.unit_cost)) if last is not None else Decimal('0')
 
 
+def _keeps_cost_without_layers(*, tenant_id: int, product_id: int, target: Decimal, before: Decimal) -> bool:
+    """هل تُبقى الكلفة السابقة غير الصفرية: هدفٌ صفر لمنتجٍ لا تبقى له طبقة.
+
+    أي لم تكن له طبقة قط، أو محا العكسُ طبقاتِ مستنده (`StockLayer.source_movement` بـCASCADE)؛
+    فهي الكلفة الوحيدة المعروفة لتسعير الطبقة المؤقتة.
+    """
+    return target == 0 and before != 0 and not StockLayer.objects.filter(
+        tenant_id=tenant_id, product_id=product_id,
+    ).exists()
+
+
 def _post_provisional_reconciliation_diff(*, movement, prod, real_unit_cost, details):
     """قيدُ الفرق حين يسدّ وارِدٌ طبقاتٍ مؤقّتة معلَّقة (مواصفة #137/تذكرة #136).
 
@@ -1231,6 +1242,8 @@ def _recompute_product_stock(product: Product, unrestored=None, unlayered_inboun
     كميّتها) بدل صيغة WAC القديمة — الطبقات نفسها **لا تُعاد بناؤها هنا**؛
     حالتها بعد `reverse_stock_movements` (التي تردّ الاستهلاك بـ
     `_restore_outbound_layers` قبل الحذف) هي مصدر الحقيقة.
+    وعند هدف صفر لمنتجٍ لا تبقى له طبقة تُحفظ الكلفة السابقة غير الصفرية، فهي
+    الوحيدة المعروفة لتسعير الطبقة المؤقتة لاحقاً.
 
     ورصيدٌ لا تغطّيه الطبقات يُرأب قبل الاشتقاق بـ`fifo.backfill_opening_layer`
     — كما في `record_stock_movement` — وإلّا اشتُقّت الكلفةُ من رتلٍ فارغٍ
@@ -1279,9 +1292,12 @@ def _recompute_product_stock(product: Product, unrestored=None, unlayered_inboun
                 quantity_on_hand=prod.quantity_on_hand,
                 avg_cost=returned_value / returned_qty,
             )
-        prod.avg_cost = fifo.derived_avg_cost(
+        target = fifo.derived_avg_cost(
             tenant_id=prod.tenant_id, product_id=prod.pk,
         ).quantize(Decimal('0.0001'))
+        prod.avg_cost = book_avg if _keeps_cost_without_layers(
+            tenant_id=prod.tenant_id, product_id=prod.pk, target=target, before=book_avg,
+        ) else target
         prod.save(update_fields=['quantity_on_hand', 'avg_cost'])
         for gap in fifo.layer_balance_gaps(tenant_id=prod.tenant_id, product_ids=[prod.pk]):
             if gap['excess'] > 0:
@@ -2425,7 +2441,7 @@ def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
     - أمّا رصيدٌ موجبٌ غير مغطّى بالكامل بالطبقات (بياناتٌ قديمة بلا طبقات)
       فحالته `'skipped_uncovered'` ولا يُكتَب شيءٌ (لأن `backfill_opening_layer`
       يحتاج القيمة السابقة).
-    - إن كان الهدف صفراً وكلفته السابقة غير صفرية ولم تكن للمنتج طبقةٌ قط، فحالته `'skipped_no_layers'` ولا يُكتَب
+    - إن كان الهدف صفراً وكلفته السابقة غير صفرية ولا تبقى للمنتج طبقة، فحالته `'skipped_no_layers'` ولا يُكتَب
       شيءٌ: `avg_cost` هو الكلفة الوحيدة المعروفة وتسعير الطبقة المؤقتة يحتاجه.
 
     يكتب `avg_cost` فقط عند `apply=True`.
@@ -2450,9 +2466,9 @@ def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
         target = fifo.derived_avg_cost(
             tenant_id=prod.tenant_id, product_id=prod.pk,
         ).quantize(q4)
-        if target == 0 and before != 0 and not StockLayer.objects.filter(
-            tenant_id=prod.tenant_id, product_id=prod.pk,
-        ).exists():
+        if _keeps_cost_without_layers(
+            tenant_id=prod.tenant_id, product_id=prod.pk, target=target, before=before,
+        ):
             return {
                 'product_id': prod.pk,
                 'before': before,

@@ -8,6 +8,9 @@
 العلاجُ مرآةُ الرأب: `fifo.trim_opening_layers` تنقص **الطبقاتِ الافتتاحيّة وحدَها**
 بمقدار ما حُذف من وارِدٍ بلا طبقة — لا تمسّ طبقةً حقيقيّةً لها حركةُ ورود، ولا مرتجعَ
 بيعٍ عاد إلى طبقته الأصليّة (`RETURN_IN` بلا طبقةٍ خاصّة به ليس علامةَ ما قبل FIFO).
+
+ويحرس الملف أيضاً إبقاء `avg_cost` السابقة بعد إعادة الاحتساب لمنتجٍ لا تبقى له طبقة: لم تكن له قط،
+أو محا عكسُ مستنده طبقتَه.
 """
 import datetime
 from decimal import Decimal
@@ -16,7 +19,11 @@ import pytest
 from django.contrib.auth.models import User
 
 from inventory.models import Product, StockLayer, StockMovement
-from inventory.services import record_stock_movement, reverse_stock_movements
+from inventory.services import (
+    _recompute_product_stock,
+    record_stock_movement,
+    reverse_stock_movements,
+)
 from tenants.services import create_company
 
 pytestmark = pytest.mark.django_db
@@ -194,7 +201,6 @@ def test_trim_keeps_the_layer_cost_when_the_opening_layer_was_consumed():
 
 def test_recompute_warns_when_layers_still_exceed_the_balance(caplog):
     """فائضٌ لا يقصّه الإلغاء (سببُه غيرُ وارِدٍ محذوف) لا يمرّ صامتاً."""
-    from inventory.services import _recompute_product_stock
     tenant = _tenant("تحذير")
     product = _product(tenant, "TR-6")
     mv = record_stock_movement(
@@ -209,3 +215,81 @@ def test_recompute_warns_when_layers_still_exceed_the_balance(caplog):
 
     assert any("TR-6" in r.getMessage() for r in caplog.records), \
         "طبقاتٌ أكثرُ من الرصيد بعد إعادة الاحتساب ولا تحذير."
+
+
+def test_recompute_keeps_cost_when_no_layer_ever_existed():
+    """إعادة الاحتساب تُبقي الكلفة السابقة لمنتج لم تكن له طبقة قط، ولا تُنشئ طبقة."""
+    tenant = _tenant("بلا طبقة")
+    product = _product(tenant, "TR-NL-1")
+    product.avg_cost = Decimal("1050")
+    product.save(update_fields=["avg_cost"])
+
+    _recompute_product_stock(product)
+
+    product.refresh_from_db()
+    assert product.avg_cost == Decimal("1050.0000")
+    assert not StockLayer.objects.filter(product=product).exists()
+
+
+def test_reversal_keeps_legacy_cost_for_next_negative_sale():
+    """عكس شراء قديم يُبقي كلفته لتسعير الطبقة المؤقتة في البيع السالب التالي."""
+    tenant = _tenant("عكس بلا طبقة")
+    product = _product(tenant, "TR-NL-2")
+    product.quantity_on_hand = Decimal("-1")
+    product.avg_cost = Decimal("95")
+    product.save(update_fields=["quantity_on_hand", "avg_cost"])
+    # الحركات تُزرع مباشرةً لأن `record_stock_movement` ينشئ طبقة مؤقتة للصادر الأول،
+    # والسيناريو يحتاج منتجاً لم تكن له طبقة قط.
+    StockMovement.objects.create(
+        tenant=tenant, product=product, movement_type="OUT", quantity=Decimal("3"),
+        unit_cost=Decimal("95"), movement_date=D, reference_type="SALE", reference_id=1001)
+    StockMovement.objects.create(
+        tenant=tenant, product=product, movement_type="IN", quantity=Decimal("2"),
+        unit_cost=Decimal("95"), movement_date=D, reference_type="PURCHASE_INVOICE", reference_id=1002)
+    assert not StockLayer.objects.filter(product=product).exists()
+
+    reverse_stock_movements(
+        tenant_id=tenant.TenantID, reference_id=1002, reference_types=["PURCHASE_INVOICE"])
+
+    product.refresh_from_db()
+    assert product.quantity_on_hand == Decimal("-3.0000")
+    assert product.avg_cost == Decimal("95.0000")
+    record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("2"), movement_date=D, tenant=tenant)
+    assert StockLayer.objects.get(product=product, is_provisional=True).unit_cost == Decimal("95.0000")
+
+
+def test_reversal_of_only_purchase_keeps_its_cost():
+    """عكس الشراء الوحيد يمحو طبقته بالتتابع ويُبقي كلفته."""
+    tenant = _tenant("شراء وحيد")
+    product = _product(tenant, "TR-NL-4")
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("10"), unit_cost=Decimal("40"),
+        reference_type="PURCHASE_INVOICE", reference_id=1101, movement_date=D, tenant=tenant)
+    product.refresh_from_db()
+    assert StockLayer.objects.filter(product=product).exists()
+    assert product.avg_cost == Decimal("40.0000")
+
+    reverse_stock_movements(
+        tenant_id=tenant.TenantID, reference_id=1101, reference_types=["PURCHASE_INVOICE"])
+
+    product.refresh_from_db()
+    assert not StockLayer.objects.filter(product=product).exists()
+    assert product.quantity_on_hand == Decimal("0.0000")
+    assert product.avg_cost == Decimal("40.0000")
+
+
+def test_recompute_still_zeroes_cost_when_a_layer_was_consumed():
+    """حارسٌ للسلوك القائم: طبقةٌ مستهلَكة تكفي لعدم إبقاء الكلفة."""
+    tenant = _tenant("طبقة مستهلكة")
+    product = _product(tenant, "TR-NL-3")
+    product.avg_cost = Decimal("40")
+    product.save(update_fields=["avg_cost"])
+    StockLayer.objects.create(
+        tenant=tenant, product=product, layer_date=D, original_qty=Decimal("1"),
+        remaining_qty=Decimal("0"), unit_cost=Decimal("40"))
+
+    _recompute_product_stock(product)
+
+    product.refresh_from_db()
+    assert product.avg_cost == Decimal("0.0000")
