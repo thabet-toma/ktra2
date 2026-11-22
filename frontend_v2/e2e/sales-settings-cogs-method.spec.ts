@@ -239,12 +239,10 @@ async function installMocks(page: Page) {
         };
         const accountIds = () => accounts.map((a) => a.id);
         const accountPkError = (value: unknown) => pkError(value, accountIds);
-        // مرآة `ChoiceField` لحقلٍ بلا `allow_null` (`Field` `null`، ثم `invalid_choice`)،
-        // ثم `validate_cogs_cost_method` لـavco.
+        // مرآة `ChoiceField` لحقلٍ بلا `allow_null` (`Field` `null`، ثم `invalid_choice`).
         const cogsMethodError = (value: unknown): string | null => {
           if (value === null) return "لا يمكن لهذا الحقل ان يكون فارغاً null.";
           if (!COGS_METHOD_CHOICES.includes(String(value))) return `"${String(value)}" ليس خياراً صالحاً.`;
-          if (value === "avco") return "طريقة المتوسط المرجّح غير متاحة بعد.";
           return null;
         };
         // مرحلة الحقول (`to_internal_value`) بترتيب `Meta.fields`: تُجمع أخطاء الحقول كلها ثم 400.
@@ -357,7 +355,7 @@ async function installMocks(page: Page) {
   return { patchPayloads };
 }
 
-test("إعداد طريقة تكلفة المبيعات: جدول المثال، إخفاء avco، وتأكيد التغيير قبل الإرسال", async ({ page }) => {
+test("إعداد طريقة تكلفة المبيعات: جدول المثال يعرض الطرق الأربع، وتأكيد التغيير قبل الإرسال", async ({ page }) => {
   const { patchPayloads } = await installMocks(page);
   await page.goto("/sales/settings");
 
@@ -372,7 +370,13 @@ test("إعداد طريقة تكلفة المبيعات: جدول المثال،
   const optionValues = await select.locator("option").evaluateAll((opts) =>
     opts.map((o) => (o as HTMLOptionElement).value),
   );
-  expect(optionValues).toEqual(["fifo", "standard", "last_purchase"]);
+  expect(optionValues).toEqual(["fifo", "avco", "standard", "last_purchase"]);
+
+  const avcoRow = section.getByTestId("cogs-example-table").locator('tr[data-method="avco"]');
+  expect(await section.getByTestId("cogs-example-table").locator("tbody tr").evaluateAll(
+    (rows) => rows.map((row) => row.getAttribute("data-method")),
+  )).toEqual(["fifo", "avco", "standard", "last_purchase"]);
+  await expect(avcoRow.locator("td")).toHaveText(["متوسط مرجّح بالكميّة (AVCO)", "120", "—", "120", "24"]);
 
   const standardRow = section.getByTestId("cogs-example-table").locator('tr[data-method="standard"]');
   await expect(standardRow).toContainText("110");

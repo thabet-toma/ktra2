@@ -8,25 +8,22 @@ import {
   normalizeCogsCostMethod,
 } from './cogsCostMethod.ts';
 
-test('COGS_COST_METHOD_OPTIONS has fifo, standard, last_purchase in order and hides avco until M5', () => {
+test('COGS_COST_METHOD_OPTIONS has all four methods in order', () => {
   assert.deepEqual(
     COGS_COST_METHOD_OPTIONS.map((o) => o.value),
-    ['fifo', 'standard', 'last_purchase'],
-  );
-  assert.equal(
-    COGS_COST_METHOD_OPTIONS.some((o) => (o.value as string) === 'avco'),
-    false,
+    ['fifo', 'avco', 'standard', 'last_purchase'],
   );
   assert.equal(COGS_COST_METHOD_OPTIONS[0].label, 'الوارد أولاً يصرف أولاً (FIFO)');
-  assert.equal(COGS_COST_METHOD_OPTIONS[1].label, 'السعر الثابت (التكلفة المعيارية)');
-  assert.equal(COGS_COST_METHOD_OPTIONS[2].label, 'آخر سعر شراء');
+  assert.equal(COGS_COST_METHOD_OPTIONS[1].label, 'متوسط مرجّح بالكميّة (AVCO)');
+  assert.equal(COGS_COST_METHOD_OPTIONS[2].label, 'السعر الثابت (التكلفة المعيارية)');
+  assert.equal(COGS_COST_METHOD_OPTIONS[3].label, 'آخر سعر شراء');
 });
 
-test('normalizeCogsCostMethod treats missing or unknown (including avco) as fifo', () => {
+test('normalizeCogsCostMethod accepts avco and treats missing or unknown as fifo', () => {
   assert.equal(normalizeCogsCostMethod('fifo'), 'fifo');
   assert.equal(normalizeCogsCostMethod('standard'), 'standard');
   assert.equal(normalizeCogsCostMethod('last_purchase'), 'last_purchase');
-  assert.equal(normalizeCogsCostMethod('avco'), 'fifo');
+  assert.equal(normalizeCogsCostMethod('avco'), 'avco');
   assert.equal(normalizeCogsCostMethod('unknown'), 'fifo');
   assert.equal(normalizeCogsCostMethod(null), 'fifo');
   assert.equal(normalizeCogsCostMethod(undefined), 'fifo');
@@ -44,7 +41,7 @@ test('isFixedSnapshotMethod is true for standard and last_purchase only', () => 
 
 test('computeCogsExampleRows computes §4 scenario (8@10, 4@16, sell 10, standard 11) from layers', () => {
   const rows = computeCogsExampleRows();
-  assert.equal(rows.length, 3);
+  assert.equal(rows.length, 4);
 
   assert.deepEqual(
     rows.map((r) => ({
@@ -65,6 +62,15 @@ test('computeCogsExampleRows computes §4 scenario (8@10, 4@16, sell 10, standar
         varianceText: '—',
         inventoryCredit: 112,
         remainingInventory: 32,
+      },
+      {
+        method: 'avco',
+        cogs: 120,
+        varianceSide: 'none',
+        varianceAmount: 0,
+        varianceText: '—',
+        inventoryCredit: 120,
+        remainingInventory: 24,
       },
       {
         method: 'standard',
@@ -93,6 +99,8 @@ test('computeCogsExampleRows computes a non-default multi-layer scenario without
   // - FIFO consumption of 12: 5*20 + 7*30 = 100 + 210 = 310 (inventoryCredit = 310)
   // - Remaining stock: 3*30 + 6*35 = 90 + 210 = 300
   // - fifo: cogs = 310, diff = 310 - 310 = 0 -> none 0
+  // - avco: 21 وحدة بقيمة 100 + 300 + 210 = 610؛ التكلفة round2(12 × 610 / 21) = 348.57،
+  //   ودائن المخزون 348.57 والباقي round2(610 − 348.57) = 261.43، بلا فرق.
   // - standard: cogs = 12 * 24 = 288, diff = 310 - 288 = +22 -> debit 22
   // - last_purchase (last layer unitCost = 35): cogs = 12 * 35 = 420, diff = 310 - 420 = -110 -> credit 110
   const rows = computeCogsExampleRows({
@@ -124,6 +132,15 @@ test('computeCogsExampleRows computes a non-default multi-layer scenario without
         varianceText: '—',
         inventoryCredit: 310,
         remainingInventory: 300,
+      },
+      {
+        method: 'avco',
+        cogs: 348.57,
+        varianceSide: 'none',
+        varianceAmount: 0,
+        varianceText: '—',
+        inventoryCredit: 348.57,
+        remainingInventory: 261.43,
       },
       {
         method: 'standard',

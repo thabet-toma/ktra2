@@ -6,7 +6,6 @@ from rest_framework import serializers
 
 from accounting.models import Account, Cheque, TaxRate
 from inventory.models import (
-    COGS_METHOD_AVCO,
     COGS_METHOD_LAST_PURCHASE,
     COGS_METHOD_STANDARD,
     Product,
@@ -1116,11 +1115,6 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "vat_input_account_name",
             "cost_variance_account_name",
         ]
-
-    def validate_cogs_cost_method(self, value):
-        if value == COGS_METHOD_AVCO:
-            raise serializers.ValidationError("طريقة المتوسط المرجّح غير متاحة بعد.")
-        return value
 
     def _cogs_settings_changed(self, data):
         instance = self.instance

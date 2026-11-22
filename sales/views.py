@@ -30,6 +30,7 @@ from core.posted_text import PostedTextEditMixin
 from core.tenant_utils import get_branch, get_tenant
 from core.terminology import term as tenant_term
 from inventory.models import (
+    COGS_METHOD_AVCO,
     COGS_METHOD_FIFO,
     COGS_METHOD_LAST_PURCHASE,
     COGS_METHOD_STANDARD,
@@ -1895,7 +1896,7 @@ class SalesSettingsViewSet(viewsets.ViewSet):
         فاتورة إلى أفضل تطابق من شجرة الحسابات (حسب الكود ثم النوع ثم الاسم).
 
         يتطلّب صلاحية `sales.settings.manage`، ويعيد فحص حساب فروقات التكلفة أمام
-        حساب التكلفة الجديد (`fifo` يمسح غير الصالح؛ `standard`/`last_purchase` يحلّان
+        حساب التكلفة الجديد (`fifo`/`avco` يمسحان غير الصالح؛ `standard`/`last_purchase` يحلّان
         الافتراضي أو يعيدان 400 دون حفظ أيّ تغيير).
         """
         tenant = get_tenant(request)
@@ -1936,7 +1937,7 @@ class SalesSettingsViewSet(viewsets.ViewSet):
                 tenant_id=tenant.TenantID,
                 default_cogs_account=ss.default_cogs_account,
             )
-            if ss.cogs_cost_method == COGS_METHOD_FIFO:
+            if ss.cogs_cost_method in (COGS_METHOD_FIFO, COGS_METHOD_AVCO):
                 if err is not None:
                     ss.cost_variance_account = None
             elif ss.cogs_cost_method in (COGS_METHOD_STANDARD, COGS_METHOD_LAST_PURCHASE):

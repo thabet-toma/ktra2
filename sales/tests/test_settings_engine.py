@@ -429,12 +429,24 @@ class SalesSettingsCogsCostMethodTest(APITestCase):
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(SalesSettings.objects.get(tenant=self.tenant).cogs_cost_method, "standard")
 
-    def test_g2_rejects_avco_cogs_cost_method_until_m5(self):
+    def test_g2_accepts_avco_cogs_cost_method_and_audits_it(self):
         self.client.get("/api/sales/settings/current/", **self._auth())
-        res = self._patch({"cogs_cost_method": "avco"})
-        self.assertEqual(res.status_code, 400, res.content)
-        self.assertIn("cogs_cost_method", res.json(), res.json())
         self.assertEqual(SalesSettings.objects.get(tenant=self.tenant).cogs_cost_method, "fifo")
+        res = self._patch({"cogs_cost_method": "avco"})
+        self.assertEqual(res.status_code, 200, res.content)
+        settings = SalesSettings.objects.get(tenant=self.tenant)
+        self.assertEqual(settings.cogs_cost_method, "avco")
+        self.assertIsNone(settings.cost_variance_account_id)
+        logs = ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_settings", action="update",
+        )
+        self.assertEqual(logs.count(), 1)
+        self.assertEqual(logs.first().metadata["changes"], [{
+            "field": "cogs_cost_method",
+            "label": "طريقة تكلفة المبيعات",
+            "old": "الوارد أولاً صادر أولاً (FIFO)",
+            "new": "متوسط مرجّح بالكميّة (AVCO)",
+        }])
 
     def test_g3_standard_without_default_cogs_account_returns_400_and_creates_nothing(self):
         owner = User.objects.create_user(username="g3_no_cogs_owner", password="x")
@@ -672,6 +684,32 @@ class SalesSettingsTenantScopeTest(APITestCase):
         res = self._post_restore()
         self.assertEqual(res.status_code, 200, res.content)
         ss.refresh_from_db()
+        self.assertIsNone(ss.cost_variance_account_id)
+        logs = ActivityLog.objects.filter(
+            tenant=self.tenant, entity_type="sales_settings", action="update",
+        )
+        self.assertEqual(logs.count(), 1)
+        changes = logs.first().metadata.get("changes") or []
+        by_field = {c["field"]: c for c in changes}
+        self.assertIn("cost_variance_account", by_field)
+        self.assertEqual(by_field["cost_variance_account"]["new"], "")
+
+    def test_sec_s5b_restore_defaults_avco_clears_invalid_variance_account(self):
+        ss = get_or_create_sales_settings(self.tenant)
+        expected_cogs = resolve_default_account(
+            self.tenant.TenantID, ["5101"], "Expense", "تكلفة", allow_parent=False,
+        )
+        self.assertIsNotNone(expected_cogs)
+        SalesSettings.objects.filter(pk=ss.pk).update(
+            cogs_cost_method="avco",
+            cost_variance_account=expected_cogs,
+        )
+        ActivityLog.objects.filter(tenant=self.tenant, entity_type="sales_settings").delete()
+
+        res = self._post_restore()
+        self.assertEqual(res.status_code, 200, res.content)
+        ss.refresh_from_db()
+        self.assertEqual(ss.cogs_cost_method, "avco")
         self.assertIsNone(ss.cost_variance_account_id)
         logs = ActivityLog.objects.filter(
             tenant=self.tenant, entity_type="sales_settings", action="update",

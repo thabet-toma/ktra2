@@ -1031,7 +1031,7 @@ export type SalesSettings = {
   serial_entry_mode: SerialEntryMode;
   /** M3-COGS: الرقم الأساسي المعروض في عمود السعر بجدول المنتجات. */
   product_price_column: ProductPriceColumn;
-  /** M2-COGS: طريقة احتساب تكلفة المبيعات (fifo | standard | last_purchase؛ avco مخفيّ حتى M5). */
+  /** M2-COGS: طريقة احتساب تكلفة المبيعات (fifo | avco | standard | last_purchase). */
   cogs_cost_method?: CogsCostMethod | null;
   /** M2-COGS: حساب فروقات تكلفة المبيعات (إلزامي لـ standard / last_purchase). */
   cost_variance_account?: number | null;

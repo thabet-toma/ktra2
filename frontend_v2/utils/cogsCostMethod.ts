@@ -1,11 +1,10 @@
 /**
  * M2-COGS: خيارات طريقة احتساب تكلفة البضاعة المباعة في إعدادات المبيعات
  * وحساب جدول مثال §4 من طبقات المخزون.
- *
- * ملاحظة: `avco` مخفيٌّ من القائمة عمداً حتى تذكرة M5 (الخادم يرفضه أيضاً).
  */
 export const COGS_COST_METHOD_OPTIONS = [
   { value: "fifo", label: "الوارد أولاً يصرف أولاً (FIFO)" },
+  { value: "avco", label: "متوسط مرجّح بالكميّة (AVCO)" },
   { value: "standard", label: "السعر الثابت (التكلفة المعيارية)" },
   { value: "last_purchase", label: "آخر سعر شراء" },
 ] as const;
@@ -19,7 +18,7 @@ export function isFixedSnapshotMethod(method?: string | null): boolean {
   return method === "standard" || method === "last_purchase";
 }
 
-/** القيمة المفقودة أو غير المعروفة (ومنه `avco` قبل M5) تُعامَل `fifo`. */
+/** القيمة المفقودة أو غير المعروفة تُعامَل `fifo`. */
 export function normalizeCogsCostMethod(method?: string | null): CogsCostMethod {
   return method && VALID_METHODS.has(method)
     ? (method as CogsCostMethod)
@@ -63,7 +62,7 @@ export const round2 = (n: number): number => Math.round(n * 100) / 100;
 
 /**
  * يحسب أرقام جدول المثال (§4) من الطبقات لا أرقاماً ثابتة:
- * - دائن المخزون والتكلفة الفعلية يُحسبان باستهلاك FIFO للطبقات لكل الطرق الثلاث الظاهرة.
+ * - دائن المخزون للطرق fifo وstandard وlast_purchase باستهلاك FIFO، ولـavco بالمتوسط المرجّح.
  * - الفروقات (§3.2) = دائن المخزون − تكلفة المبيعات:
  *   موجب ⇒ مدين، سالب ⇒ دائن، صفر ⇒ بلا فرق (`none`).
  */
@@ -83,6 +82,10 @@ export function computeCogsExampleRows(
   fifoCost = round2(fifoCost);
   remainingInventory = round2(remainingInventory);
 
+  const totalQty = scenario.layers.reduce((sum, layer) => sum + Math.max(0, layer.qty), 0);
+  const totalValue = scenario.layers.reduce((sum, layer) => sum + Math.max(0, layer.qty) * layer.unitCost, 0);
+  const avco = totalQty > 0 ? round2(scenario.sellQty * totalValue / totalQty) : 0;
+
   const lastUnitCost =
     scenario.layers.length > 0
       ? scenario.layers[scenario.layers.length - 1].unitCost
@@ -94,6 +97,9 @@ export function computeCogsExampleRows(
       case "fifo":
         cogs = fifoCost;
         break;
+      case "avco":
+        cogs = avco;
+        break;
       case "standard":
         cogs = round2(scenario.sellQty * scenario.standardUnitCost);
         break;
@@ -101,7 +107,7 @@ export function computeCogsExampleRows(
         cogs = round2(scenario.sellQty * lastUnitCost);
         break;
     }
-    const inventoryCredit = fifoCost;
+    const inventoryCredit = opt.value === "avco" ? avco : fifoCost;
     const diff = round2(inventoryCredit - cogs);
     const varianceSide: VarianceSide =
       diff > 0 ? "debit" : diff < 0 ? "credit" : "none";
@@ -112,7 +118,7 @@ export function computeCogsExampleRows(
       varianceSide,
       varianceAmount: Math.abs(diff),
       inventoryCredit,
-      remainingInventory,
+      remainingInventory: opt.value === "avco" ? round2(totalValue - avco) : remainingInventory,
     };
   });
 }
