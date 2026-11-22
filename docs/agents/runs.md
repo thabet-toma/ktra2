@@ -315,3 +315,4 @@
 | 2026-11-22 | SYNC-NOLAYER مراجعة نهائية | Opus ×2 (Standards/Spec) | Spec: CLEAN؛ Standards: NEEDS-FIX (وصفان بلا شرط before != 0، مقبول)؛ nits مرفوضة | ~3 دقائق لكلٍّ |
 | 2026-11-22 | SYNC-NOLAYER fix2 | gpt-6.1-terra high (codex-delegate) | وصفان فقط: شرط الكلفة السابقة غير الصفرية؛ 8 passed | قصير |
 | 2026-11-22 | SYNC-NOLAYER مراجعة الحالة النهائية | Opus ×2 (Standards/Spec) | كلاهما CLEAN؛ nits شكلية مرفوضة (لا أثر سلوكي) | ~3 دقائق لكلٍّ |
+| 2026-11-22 | SYNC-NOLAYER نشر + `--apply` على الإنتاج | المنسّق (Opus 5.5) | CI أخضر ← دمج `9d840ca4` ← معاينة ← apply (45) ← تحقّق قراءةً نظيف (لقطة قبل/بعد + فحص كلفة آخر طبقة للمصفَّرة) | ~10 دقائق |
