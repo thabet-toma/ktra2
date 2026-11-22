@@ -11,7 +11,7 @@
 
 | التاريخ | Commit | التغيير |
 |---|---|---|
-| 2026-11-22 | `TBD` | **SYNC-NOLAYER**: تحافظ `inventory/services.py` (`sync_avg_cost_from_layers`) على آخر كلفة معروفة لمنتج لم تكن له طبقات قط، لتسعير الطبقة المؤقتة لاحقاً. |
+| 2026-11-22 | `283a6f86` | **SYNC-NOLAYER**: تحافظ `inventory/services.py` (`sync_avg_cost_from_layers`) على آخر كلفة معروفة لمنتج لم تكن له طبقات قط، لتسعير الطبقة المؤقتة لاحقاً. |
 | 2026-11-22 | `6d75402c` | **M5-4-COGS**: إتاحة AVCO في إعدادات المبيعات عبر `sales/serializers.py` (`SalesSettingsSerializer`) والواجهة ومثال التكلفة في `frontend_v2/utils/cogsCostMethod.ts` (`COGS_COST_METHOD_OPTIONS`، `computeCogsExampleRows`) بلا اشتراط حساب فروقات. و`sales/views.py` (`SalesSettingsViewSet.restore_defaults`) يمسح حساب الفروقات غير الصالح في `avco` كما في `fifo`. |
 | 2026-11-22 | `46f9d8d2` | **M5-3-COGS**: مزامنة لقطة AVCO عند إعادة التقييم في `inventory/cogs_method.py` (`sync_fifo_snapshot`)، وردّ طبقات الأصل وعكس الاسترداد في `sales/services/flow.py` (`deliver_invoice_lines`، `void_delivery_note`)، وحفظ قيمة الصادر في التحويل وعكسه في `inventory/services.py` (`post_warehouse_transfer`، `unpost_warehouse_transfer`). |
 | 2026-11-22 | `e633a400` | **M5-2-COGS**: ربط AVCO بكل حركة صادرة في `inventory/services.py` (`record_stock_movement`) — طريقة الشركة تُقرأ بـSubquery في استعلام `select_for_update` نفسه (بلا استعلام إضافي، فاتورة 50 بنداً تبقى 650 استعلاماً) فيُستهلك تناسبياً في `avco` وبترتيب الورود في غيره؛ بيع AVCO يحمل `cogs_method=avco` و`cogs_cost=total_cost` (`inventory/cogs_method.py` (`apply_sale_cogs_snapshot`))، والصادر غير البيعي يحمل الوسم بلا `cogs_cost`؛ المرتجعات المرتبطة والمختلطة وإلغاء/إعادة الترحيل تردّ أصول AVCO تناسبياً. فرق التقريب D6 (0.0004) مقبول. `avco` ما زال ممنوعاً في API الإعدادات (M5-4). |
