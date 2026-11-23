@@ -11,6 +11,7 @@
 
 | التاريخ | Commit | التغيير |
 |---|---|---|
+| 2026-11-23 | — | **NEGSALE-VOID-COST** (#305): حفظ كلفة المنتج القديم في أول بيع سالب وعكسه عند غياب طبقة حقيقية، مع تخطّي مزامنة الطبقات المؤقتة وحدها. |
 | 2026-11-22 | `ec6e2757` | **RECOMPUTE-NOLAYER**: تحافظ `inventory/services.py` (`_recompute_product_stock`) على الكلفة الوحيدة لمنتجٍ لا تبقى له طبقة (لم تكن له قط، أو محا العكسُ طبقاتِ مستنده) عند عكس الحركات، بالقاعدة المشتركة مع `inventory/services.py` (`sync_avg_cost_from_layers`) لتسعير الطبقة المؤقتة. |
 | 2026-11-22 | `283a6f86` | **SYNC-NOLAYER**: تحافظ `inventory/services.py` (`sync_avg_cost_from_layers`) على آخر كلفة معروفة لمنتج لم تكن له طبقات قط، لتسعير الطبقة المؤقتة لاحقاً. |
 | 2026-11-22 | `6d75402c` | **M5-4-COGS**: إتاحة AVCO في إعدادات المبيعات عبر `sales/serializers.py` (`SalesSettingsSerializer`) والواجهة ومثال التكلفة في `frontend_v2/utils/cogsCostMethod.ts` (`COGS_COST_METHOD_OPTIONS`، `computeCogsExampleRows`) بلا اشتراط حساب فروقات. و`sales/views.py` (`SalesSettingsViewSet.restore_defaults`) يمسح حساب الفروقات غير الصالح في `avco` كما في `fifo`. |

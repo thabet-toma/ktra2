@@ -772,13 +772,10 @@ def _last_layer_unit_cost(*, tenant_id: int, product_id: int) -> Decimal:
 
 
 def _keeps_cost_without_layers(*, tenant_id: int, product_id: int, target: Decimal, before: Decimal) -> bool:
-    """هل تُبقى الكلفة السابقة غير الصفرية: هدفٌ صفر لمنتجٍ لا تبقى له طبقة.
-
-    أي لم تكن له طبقة قط، أو محا العكسُ طبقاتِ مستنده (`StockLayer.source_movement` بـCASCADE)؛
-    فهي الكلفة الوحيدة المعروفة لتسعير الطبقة المؤقتة.
-    """
+    """تُبقى الكلفة السابقة غير الصفرية عند هدف صفر وغياب طبقة غير مؤقتة: المؤقتة تحمل الكلفة السابقة نفسها
+    فلا تشهد بكلفة جديدة، والمحفوظة هي الوحيدة لتسعير المؤقتة التالية (والعكس يمحو طبقات مستنده بـCASCADE)."""
     return target == 0 and before != 0 and not StockLayer.objects.filter(
-        tenant_id=tenant_id, product_id=product_id,
+        tenant_id=tenant_id, product_id=product_id, is_provisional=False,
     ).exists()
 
 
@@ -872,7 +869,7 @@ def record_stock_movement(
     تناسبياً في AVCO وبترتيب الورود في غيره (`inventory.fifo.consume`) فتحمل
     كلفة كل جزءٍ سعر طبقته الفعلي. `Product.avg_cost` صار رقماً **مشتقّاً**
     (`inventory.fifo.derived_avg_cost`: قيمة الطبقات المفتوحة ÷ كميّتها)
-    للعرض فقط، لا مصدر كلفةٍ يُبنى عليه أي احتساب.
+    للعرض فقط، لا مصدر كلفةٍ يُبنى عليه أي احتساب، مع استثناء إبقاء الكلفة السابقة عبر `_keeps_cost_without_layers`.
 
     نفاد الطبقات المفتوحة قبل تغطية صرفٍ كاملاً (مخزون سالب مسموح): تُنشأ
     طبقة مؤقّتة (`is_provisional=True`) بالكمية غير المغطّاة، بآخر كلفةٍ
@@ -1098,10 +1095,14 @@ def record_stock_movement(
             )
 
         new_avg = fifo.derived_avg_cost(tenant_id=prod.tenant_id, product_id=prod.pk)
+        target = new_avg.quantize(Decimal('0.0001'))
+        final_avg = avg_before.quantize(Decimal('0.0001')) if _keeps_cost_without_layers(
+            tenant_id=prod.tenant_id, product_id=prod.pk, target=target, before=avg_before,
+        ) else target
 
         movement.unit_cost = unit_cost
         movement.total_cost = total_cost
-        movement.avg_cost_after = new_avg.quantize(Decimal('0.0001'))
+        movement.avg_cost_after = final_avg
         if sale_issue:
             apply_sale_cogs_snapshot(movement, method=outbound_method)
         elif is_avco:
@@ -1114,7 +1115,7 @@ def record_stock_movement(
         movement.save(update_fields=update_fields)
 
         prod.quantity_on_hand = new_qty
-        prod.avg_cost = new_avg.quantize(Decimal('0.0001'))
+        prod.avg_cost = final_avg
         prod.save(update_fields=['quantity_on_hand', 'avg_cost'])
 
         logger.info(
@@ -1242,7 +1243,7 @@ def _recompute_product_stock(product: Product, unrestored=None, unlayered_inboun
     كميّتها) بدل صيغة WAC القديمة — الطبقات نفسها **لا تُعاد بناؤها هنا**؛
     حالتها بعد `reverse_stock_movements` (التي تردّ الاستهلاك بـ
     `_restore_outbound_layers` قبل الحذف) هي مصدر الحقيقة.
-    وعند هدف صفر لمنتجٍ لا تبقى له طبقة تُحفظ الكلفة السابقة غير الصفرية، فهي
+    وعند هدف صفر لمنتجٍ لا تبقى له طبقة حقيقية (غير مؤقتة) تُحفظ الكلفة السابقة غير الصفرية، فهي
     الوحيدة المعروفة لتسعير الطبقة المؤقتة لاحقاً.
 
     ورصيدٌ لا تغطّيه الطبقات يُرأب قبل الاشتقاق بـ`fifo.backfill_opening_layer`
@@ -2441,7 +2442,7 @@ def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
     - أمّا رصيدٌ موجبٌ غير مغطّى بالكامل بالطبقات (بياناتٌ قديمة بلا طبقات)
       فحالته `'skipped_uncovered'` ولا يُكتَب شيءٌ (لأن `backfill_opening_layer`
       يحتاج القيمة السابقة).
-    - إن كان الهدف صفراً وكلفته السابقة غير صفرية ولا تبقى للمنتج طبقة، فحالته `'skipped_no_layers'` ولا يُكتَب
+    - إن كان الهدف صفراً وكلفته السابقة غير صفرية ولا تبقى للمنتج طبقة حقيقية (غير مؤقتة)، فحالته `'skipped_no_layers'` ولا يُكتَب
       شيءٌ: `avg_cost` هو الكلفة الوحيدة المعروفة وتسعير الطبقة المؤقتة يحتاجه.
 
     يكتب `avg_cost` فقط عند `apply=True`.

@@ -230,3 +230,30 @@ def test_voiding_a_delivery_note_returns_goods_to_their_layers_with_cost(env):
         format="json")
     assert again.status_code in (200, 201), again.content
     assert _sale_cost(inv.id) == Decimal("50.00")
+
+
+def test_voiding_first_negative_delivery_keeps_cost_for_next_sale(env):
+    """إلغاء أول إرسالية سالبة يحفظ كلفة البيع التالي."""
+    tenant, owner, cur, customer, cogs = env
+    product = _product(tenant, "OC-NEG")
+    product.avg_cost = Decimal("50")
+    product.save(update_fields=["avg_cost"])
+    inv, line = _invoice(tenant, cur, customer, product, number="OC-INV-NEG", qty="3",
+                         stock_on_post=False)
+    c = _client(owner, tenant)
+    assert c.post(f"/api/sales/invoices/{inv.id}/post/", {}, format="json").status_code == 200
+    delivery = c.post(
+        "/api/sales/delivery-orders/",
+        {"invoice": inv.id, "lines": [{"line_id": line.id, "quantity": 3}]}, format="json")
+    assert delivery.status_code in (200, 201), delivery.content
+    res = c.delete(f"/api/sales/delivery-orders/{delivery.json()['id']}/")
+    assert res.status_code == 200, res.content
+    product.refresh_from_db()
+    assert product.avg_cost == Decimal("50")
+    assert not StockMovement.objects.filter(reference_type="SALE", reference_id=inv.id).exists()
+    again = c.post(
+        "/api/sales/delivery-orders/",
+        {"invoice": inv.id, "lines": [{"line_id": line.id, "quantity": 2}]},
+        format="json")
+    assert again.status_code in (200, 201), again.content
+    assert _sale_cost(inv.id) == Decimal("100.00")
