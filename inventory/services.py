@@ -2494,6 +2494,119 @@ def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:
         }
 
 
+def repair_zeroed_avg_cost(product, *, apply: bool = False) -> dict:
+    """يستعيد كلفةً صُفّرت خطأً من لقطة حركة، دون تعديل الحركات أو الطبقات.
+
+    تُتخطّى الكلفة غير الصفرية والخدمات والطبقات الحقيقية وغياب التاريخ الإيجابي
+    بالحالات `skipped_nonzero` و`skipped_service` و`skipped_real_layer` و
+    `skipped_no_history`. تُحال للمراجعة لقطة لاحقة غير صفرية أو طبقة مؤقتة متعارضة
+    أو لقطات ملتبسة بالحالات `review_later_positive` و`review_layer_conflict`
+    و`review_ambiguous`. الحالة `repaired` تقترح آخر لقطة موثوقة وتكتبها فقط
+    عند `apply=True`؛ وتُرفق المراجعة بالمصدر، وتُدرج حركات الصادر الصفرية للعرض وحده.
+    """
+    q4 = Decimal('0.0001')
+    with transaction.atomic():
+        prod = Product.objects.select_for_update().get(
+            pk=product.pk, tenant_id=product.tenant_id,
+        )
+        before = Decimal(str(prod.avg_cost or 0)).quantize(q4)
+        result = {
+            'product_id': prod.pk, 'before': before, 'after': before,
+            'status': None, 'source': None, 'source_movement_id': None,
+            'zero_cost_movement_ids': [],
+        }
+        if before != 0:
+            result['status'] = 'skipped_nonzero'
+            return result
+        if prod.is_service:
+            result['status'] = 'skipped_service'
+            return result
+
+        movements = list(StockMovement.objects.filter(
+            tenant_id=prod.tenant_id, product_id=prod.pk,
+        ).order_by('created_at', 'id'))
+        result['zero_cost_movement_ids'] = [
+            m.pk for m in movements
+            if m.movement_type in OUTBOUND_TYPES
+            and m.effective_cogs == 0
+        ]
+        layers = StockLayer.objects.filter(tenant_id=prod.tenant_id, product_id=prod.pk)
+        if layers.filter(is_provisional=False).exists():
+            result['status'] = 'skipped_real_layer'
+            return result
+
+        triggers = [
+            i for i, m in enumerate(movements)
+            if m.movement_type in OUTBOUND_TYPES
+            and m.avg_cost_before > 0
+            and m.avg_cost_after == 0
+        ]
+        if triggers:
+            index = triggers[-1]
+            source = 'trigger'
+            target = movements[index].avg_cost_before.quantize(q4)
+            review_status = 'review_later_positive'
+        else:
+            positives = [i for i, m in enumerate(movements) if m.avg_cost_after > 0]
+            if not positives:
+                result['status'] = 'skipped_no_history'
+                return result
+            index = positives[-1]
+            source = 'last_positive_after'
+            target = movements[index].avg_cost_after.quantize(q4)
+            review_status = 'review_ambiguous'
+        result.update(source=source, source_movement_id=movements[index].pk)
+        if any(
+            m.avg_cost_before != 0 or m.avg_cost_after != 0
+            for m in movements[index + 1:]
+        ):
+            result['status'] = review_status
+            return result
+
+        later_ids = [m.pk for m in movements[index:]]
+        conflict = layers.filter(
+            is_provisional=True,
+            source_movement_id__in=later_ids,
+            unit_cost__gt=0,
+        ).exclude(unit_cost=target).exists()
+        if conflict:
+            result['status'] = 'review_layer_conflict'
+            return result
+        if apply:
+            prod.avg_cost = target
+            prod.save(update_fields=['avg_cost'])
+        result.update(status='repaired', after=target)
+        return result
+
+
+def set_owner_avg_cost(product, cost, *, apply: bool = False) -> dict:
+    """يضبط كلفة حدّدها المالك لمنتجٍ مصفَّر فقط، دون تغيير الحركات أو الطبقات.
+
+    لا يكتب إلا عند `apply=True`؛ والكلفة غير الصفرية تُتخطّى بـ`skipped_nonzero`.
+    """
+    q4 = Decimal('0.0001')
+    with transaction.atomic():
+        prod = Product.objects.select_for_update().get(
+            pk=product.pk, tenant_id=product.tenant_id,
+        )
+        before = Decimal(str(prod.avg_cost or 0)).quantize(q4)
+        target = Decimal(str(cost)).quantize(q4)
+        if target <= 0:
+            raise ValueError(f'كلفة المالك يجب أن تكون موجبة: {cost}')
+        if before != 0:
+            return {
+                'product_id': prod.pk, 'before': before, 'after': before,
+                'status': 'skipped_nonzero',
+            }
+        if apply:
+            prod.avg_cost = target
+            prod.save(update_fields=['avg_cost'])
+        return {
+            'product_id': prod.pk, 'before': before, 'after': target,
+            'status': 'owner_set',
+        }
+
+
 # ════════════════════════════════════════════════════════════════════
 # Phase 7 (T-I1/T-I2): ترحيل مستندات المخزون — تحويل + جرد
 # ════════════════════════════════════════════════════════════════════

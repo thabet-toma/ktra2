@@ -83,6 +83,8 @@ def product_linked_invoices(*, tenant_id, product_id=None, product_ids=None) -> 
 # وحدَه كان يجعل الواجهةَ تكتب «بيع» على المرتجع في كرت الصنف وملفّ الطرف.
 def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:  # تفصيل تكلفة المشتريات المرحّلة للعرض
 def sync_avg_cost_from_layers(product, *, apply: bool = False) -> dict:  # يزامن Product.avg_cost من متوسط طبقات FIFO المفتوحة ويتخطّى غير المغطّى ومن لا تبقى له طبقة حقيقية (غير مؤقتة) عندما يكون الهدف صفراً
+def repair_zeroed_avg_cost(product, *, apply: bool = False) -> dict:  # يستعيد الكلفة المصفّرة من لقطات الحركات مع مراجعة التعارضات
+def set_owner_avg_cost(product, cost, *, apply: bool = False) -> dict:  # يضبط كلفة المالك لمنتجٍ مصفَّر فقط
 def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:  # (78)
 def generate_next_sku(tenant) -> str:  # (140)
 def create_product_with_family(*, tenant=None, tenant_id=None, **fields) -> tuple[ProductFamily, Product]:  # نقطة الإنشاء الموحّدة الوحيدة (task20) — أربعة مسارات حيّة تمرّ من هنا: واجهة المنتجات، وتجسيد عرض المورّد، ومنتج الأجرة في `after_sales`، وجسر المزامنة `bridge`
@@ -788,7 +790,8 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 - **`STATUS_ISSUED` ليس `STATUS_SOLD`**: `consume_sales_serials`/التخصيص التلقائي FIFO
   للبيع يستعلمان `in_stock` وحدها، فوحدةٌ صُرفت خارج البيع (`issue_serials`، #223) لا
   يخصّصها بيعٌ لاحق أبداً — الفرق حالةٌ لا مجرّد علم.
-- **كتّاب الرصيد والكلفة:** يتغيّر `quantity_on_hand` عبر `inventory/services.py` (`record_stock_movement`, `_recompute_product_stock`)؛ ويكتب `avg_cost` هذان أيضاً و`inventory/services.py` (`sync_avg_cost_from_layers`) و`logistics/domain/landed_revaluation.py` (`apply`). تقفل `record_stock_movement` المنتج داخل `transaction.atomic` وتحفظ لقطات before/after على الحركة.
+- **كتّاب الرصيد والكلفة:** يتغيّر `quantity_on_hand` عبر `inventory/services.py` (`record_stock_movement`, `_recompute_product_stock`)؛ ويكتب `avg_cost` هذان أيضاً و`inventory/services.py` (`sync_avg_cost_from_layers`) و`logistics/domain/landed_revaluation.py` (`apply`)، ولمرّةٍ واحدة أمر الصيانة `inventory/services.py` (`repair_zeroed_avg_cost`, `set_owner_avg_cost`). تقفل `record_stock_movement` المنتج داخل `transaction.atomic` وتحفظ لقطات before/after على الحركة.
+- **إصلاح الكلفة القديمة:** `inventory/management/commands/repair_zeroed_avg_cost.py` (`Command`) يعاين أو يطبّق `inventory/services.py` (`repair_zeroed_avg_cost`)، ويستثني المنتجات بـ`--exclude` ويضبط كلفة المالك لمنتجات مصفَّرة مسمّاة بـ`--set`، ويعرض حركات الصادر الصفرية دون تعديلها.
 - **ترحيل الجرد يقفل صفّه ويُرقَّم من دفتر `stocktake`** (`inventory/services.py` — `post_stocktake`):
   **القفل وإعادة الفحص هما الحارس** — الفحص الأوّلي على `is_posted` لا يكفي (نسخةٌ قديمة
   تمرّ منه)؛ داخل المعاملة يُعاد جلب صفّ الجرد بـ`select_for_update()` ويُعاد فحص `is_posted`
