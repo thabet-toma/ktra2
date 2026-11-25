@@ -248,3 +248,189 @@ def test_international_return_needs_the_posted_invoice(env):
         create_purchase_return(
             tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
             lines=[{"product": product.id, "quantity": 1, "unit_price": 100}])
+
+
+# ── B1 PRET-FX-DOUBLE: مرتجع بعملة أجنبية يُحوَّل بالأساس مرةً واحدة ─────────
+
+def _usd_currency():
+    return Currency.objects.create(Code="USD", Name="دولار", Symbol="$", IsBaseCurrency=False)
+
+
+def _posted_local_invoice(tenant, supplier, product, *, currency, exchange_rate, qty=5,
+                          price=100, is_taxable=False, vat_percent=0):
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+    rate = Decimal(str(exchange_rate))
+    net = (Decimal(str(qty)) * Decimal(str(price))).quantize(Decimal("0.01"))
+    vat = (net * Decimal(str(vat_percent)) / Decimal("100")).quantize(Decimal("0.01")) if is_taxable else Decimal("0.00")
+    grand = (net + vat).quantize(Decimal("0.01"))
+    inv_doc = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="PINV-FX", invoice_date="2026-06-01",
+        partner=supplier, currency=currency, exchange_rate=rate,
+        invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL, is_return=False,
+        subtotal=net, tax_amount=vat, grand_total=grand,
+        is_posted=True,
+    )
+    PurchaseInvoiceItem.objects.create(
+        invoice=inv_doc, product=product, name="منتج",
+        quantity=Decimal(str(qty)), unit_price=Decimal(str(price)),
+        total_price=net, is_taxable=is_taxable, vat_percent=Decimal(str(vat_percent)),
+    )
+    return inv_doc
+
+
+def test_local_usd_return_converts_to_base_once_without_vat(env):
+    """مرتجع 1 × 100$ بسعر 3.7 بلا ضريبة (بشكل استدعاء الـAPI بلا currency صريح):
+    الاسمي 100$ مسودةً وترحيلاً والأساس 370 لا 1369."""
+    tenant, supplier, product, ap, inv = env
+    usd = _usd_currency()
+    rate = Decimal("3.7")
+    orig = _posted_local_invoice(
+        tenant, supplier, product, currency=usd, exchange_rate=rate, qty=5, price=100,
+    )
+
+    ret = create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 1, "unit_price": 100}],
+        exchange_rate=orig.exchange_rate,
+    )
+    assert (ret.currency_id, ret.exchange_rate) == (usd.CurrencyID, rate)
+    assert (ret.subtotal, ret.tax_amount, ret.grand_total) == (
+        Decimal("100.00"), Decimal("0.00"), Decimal("100.00"),
+    )
+    post_purchase_return(ret, user=None)
+    ret.refresh_from_db()
+
+    ap_line = JournalLine.objects.get(journal=ret.journal, partner=supplier)
+    inv_line = JournalLine.objects.get(journal=ret.journal, account=inv)
+    assert (ap_line.debit, ap_line.base_debit, ap_line.amount_currency, ap_line.currency_code) == (
+        Decimal("100.00"), Decimal("370.00"), Decimal("100.00"), "USD",
+    )
+    assert (inv_line.credit, inv_line.base_credit) == (Decimal("100.00"), Decimal("370.00"))
+    assert (ret.subtotal, ret.tax_amount, ret.grand_total) == (
+        Decimal("100.00"), Decimal("0.00"), Decimal("100.00"),
+    )
+
+
+def test_local_usd_return_converts_to_base_once_with_vat_16(env):
+    """مرتجع 1 × 100$ + ضريبة 16% بسعر 3.7: الضريبة 16$/59.20₪، الذمم 116$/429.20₪."""
+    tenant, supplier, product, ap, inv = env
+    usd = _usd_currency()
+    rate = Decimal("3.7")
+    vat_acc = Account.objects.filter(tenant=tenant, code="1105").first()
+    assert vat_acc is not None, "seed missing 1105"
+    orig = _posted_local_invoice(
+        tenant, supplier, product, currency=usd, exchange_rate=rate,
+        qty=5, price=100, is_taxable=True, vat_percent=16,
+    )
+
+    ret = create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 1, "unit_price": 100}],
+        currency=usd, exchange_rate=rate,
+    )
+    assert (ret.subtotal, ret.tax_amount, ret.grand_total) == (
+        Decimal("100.00"), Decimal("16.00"), Decimal("116.00"),
+    )
+    post_purchase_return(ret, user=None)
+    ret.refresh_from_db()
+
+    ap_line = JournalLine.objects.get(journal=ret.journal, partner=supplier)
+    inv_line = JournalLine.objects.get(journal=ret.journal, account=inv)
+    vat_line = JournalLine.objects.get(journal=ret.journal, account=vat_acc)
+    assert (vat_line.credit, vat_line.base_credit) == (Decimal("16.00"), Decimal("59.20"))
+    assert (inv_line.credit, inv_line.base_credit) == (Decimal("100.00"), Decimal("370.00"))
+    assert (ap_line.debit, ap_line.base_debit, ap_line.amount_currency, ap_line.currency_code) == (
+        Decimal("116.00"), Decimal("429.20"), Decimal("116.00"), "USD",
+    )
+    assert (ret.subtotal, ret.tax_amount, ret.grand_total) == (
+        Decimal("100.00"), Decimal("16.00"), Decimal("116.00"),
+    )
+
+
+def test_local_base_currency_return_unchanged(env):
+    """مرتجع محلي بعملة الأساس (ILS، سعر 1) مع ضريبة 16%: السلوك والأرقام لا تتغير."""
+    tenant, supplier, product, ap, inv = env
+    vat_acc = Account.objects.filter(tenant=tenant, code="1105").first()
+    assert vat_acc is not None, "seed missing 1105"
+    orig = _posted_local_invoice(
+        tenant, supplier, product, currency=tenant._cur, exchange_rate=Decimal("1"),
+        qty=5, price=100, is_taxable=True, vat_percent=16,
+    )
+
+    ret = create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 1, "unit_price": 100}],
+    )
+    post_purchase_return(ret, user=None)
+    ret.refresh_from_db()
+
+    ap_line = JournalLine.objects.get(journal=ret.journal, partner=supplier)
+    inv_line = JournalLine.objects.get(journal=ret.journal, account=inv)
+    vat_line = JournalLine.objects.get(journal=ret.journal, account=vat_acc)
+    assert (ap_line.debit, ap_line.base_debit, ap_line.amount_currency, ap_line.currency_code) == (
+        Decimal("116.00"), Decimal("116.00"), None, None,
+    )
+    assert (inv_line.credit, inv_line.base_credit) == (Decimal("100.00"), Decimal("100.00"))
+    assert (vat_line.credit, vat_line.base_credit) == (Decimal("16.00"), Decimal("16.00"))
+    assert (ret.subtotal, ret.tax_amount, ret.grand_total) == (
+        Decimal("100.00"), Decimal("16.00"), Decimal("116.00"),
+    )
+
+
+def test_international_foreign_currency_return_not_doubled(env):
+    """الدولية بعملة أجنبية: قيد الأصل اسمي بسعر 3.7 و`_international_return_split`
+    ينسخ النسبة الاسمية بلا ضرب في السعر، فيحوّل `JournalLine.save` مرةً واحدة.
+    حارس توصيف (characterization guard) يمرّ قبل الإصلاح وبعده؛ رأسٌ دوليٌّ بالدولار
+    ينشأ فقط من فاتورة دولية مُدخَلة يدوياً، فالفواتير المبنية من النظام عبر
+    `logistics/landed_cost.py` (`build_purchase_invoice_row`) تكون بالشيكل بسعر 1."""
+    from accounting.models import JournalHeader
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+
+    tenant, supplier, product, ap, inv = env
+    usd = _usd_currency()
+    rate = Decimal("3.7")
+    freight = Account.objects.create(tenant=tenant, code="5301-FX", name="شحن", account_type="Expense")
+    clearance = Account.objects.create(tenant=tenant, code="5307-FX", name="تخليص", account_type="Expense")
+    jh = JournalHeader.objects.create(
+        tenant=tenant, transaction_date="2026-06-01", is_posted=True,
+        currency=usd, exchange_rate=rate,
+        reference_type="PURCHASE_INVOICE", reference_id=None,
+    )
+    for account, debit, credit, partner in (
+        (inv, 1000, 0, None), (supplier.linked_account, 0, 700, supplier),
+        (freight, 0, 200, None), (clearance, 0, 100, None),
+    ):
+        JournalLine.objects.create(
+            tenant=tenant, journal=jh, account=account,
+            debit=Decimal(debit), credit=Decimal(credit), partner=partner,
+        )
+    orig = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="PI-INT-FX", invoice_date="2026-06-01",
+        partner=supplier, currency=usd, exchange_rate=rate,
+        invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+        subtotal=Decimal("1000"), grand_total=Decimal("1000"), is_posted=True, journal=jh,
+    )
+    PurchaseInvoiceItem.objects.create(
+        invoice=orig, product=product, name="منتج", quantity=Decimal("10"),
+        unit_price=Decimal("100"), total_price=Decimal("1000"), landed_unit_price_ils=Decimal("370"),
+    )
+
+    ret = create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 3, "unit_price": 100}],
+    )
+    post_purchase_return(ret, user=None)
+    ret.refresh_from_db()
+
+    ap_line = JournalLine.objects.get(journal=ret.journal, partner=supplier)
+    freight_line = JournalLine.objects.get(journal=ret.journal, account=freight)
+    clearance_line = JournalLine.objects.get(journal=ret.journal, account=clearance)
+    inv_line = JournalLine.objects.get(journal=ret.journal, account=inv)
+    assert (ap_line.debit, ap_line.base_debit, ap_line.amount_currency, ap_line.currency_code) == (
+        Decimal("210.00"), Decimal("777.00"), Decimal("210.00"), "USD",
+    )
+    assert (freight_line.debit, freight_line.base_debit) == (Decimal("60.00"), Decimal("222.00"))
+    assert (clearance_line.debit, clearance_line.base_debit) == (Decimal("30.00"), Decimal("111.00"))
+    assert (inv_line.credit, inv_line.base_credit) == (Decimal("300.00"), Decimal("1110.00"))
+    assert (ret.grand_total, ret.tax_amount) == (Decimal("210.00"), Decimal("0.00"))
+

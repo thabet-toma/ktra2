@@ -3486,7 +3486,8 @@ def create_purchase_return(
             if prod is None:
                 raise ValidationError(f"المنتج {l['product']} غير موجود أو لا يتبع الشركة.")
             qty = l['quantity']
-            line_net = (qty * l['unit_price'] * base_factor).quantize(DEC)
+            # المبالغ الاسمية بعملة المستند؛ التحويل للأساس يتم مرّةً واحدة في JournalLine.save عند الترحيل.
+            line_net = (qty * l['unit_price']).quantize(DEC)
             vat_pct = vat_by_product.get(prod.id, _D('0'))
             inv_net += line_net
             inv_vat += (line_net * vat_pct / _D('100')).quantize(DEC)
@@ -3564,7 +3565,8 @@ def post_purchase_return(invoice, *, user=None):
             qty = _D(str(it.quantity or 0))
             if qty <= 0:
                 continue
-            line_net = (qty * _D(str(it.unit_price or 0)) * base_factor).quantize(DEC)
+            # الأسطر اسمية بعملة الفاتورة؛ `JournalLine.save` يحوّلها إلى العملة الأساسية مرّةً واحدة بسعر الرأس.
+            line_net = (qty * _D(str(it.unit_price or 0))).quantize(DEC)
             vat_pct = _D(str(it.vat_percent or 0)) if it.is_taxable else _D('0')
             inv_net += line_net
             inv_vat += (line_net * vat_pct / _D('100')).quantize(DEC)
