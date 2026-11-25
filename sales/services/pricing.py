@@ -381,6 +381,7 @@ def customer_price_list(
                 "label": "آخر فاتورة",
                 "unit_price": str(ln_last["unit_price"]),
                 "source_type": "SALES_INVOICE",
+                "kind": "last",
                 "document_id": ln_last["invoice_id"],
                 "invoice_number": ln_last["invoice__invoice_number"],
             })
@@ -389,6 +390,7 @@ def customer_price_list(
                 "label": "أقل سعر",
                 "unit_price": str(ln_lowest["unit_price"]),
                 "source_type": "SALES_INVOICE",
+                "kind": "lowest",
                 "document_id": ln_lowest["invoice_id"],
                 "invoice_number": ln_lowest["invoice__invoice_number"],
             })
@@ -398,6 +400,7 @@ def customer_price_list(
                 "label": "عرض السعر",
                 "unit_price": str(sq["unit_price"]),
                 "source_type": "QUOTE",
+                "kind": "quote",
                 "document_id": None,  # عرض (لا فاتورة) — نتفادى رابط فاتورة خاطئ
                 "invoice_number": sq["quotation__quotation_number"],
             })
@@ -406,6 +409,7 @@ def customer_price_list(
                 "label": "عرض السعر",
                 "unit_price": str(q.unit_price),
                 "source_type": "QUOTE",
+                "kind": "quote",
                 "document_id": q.id,
                 "invoice_number": None,
             })
@@ -416,6 +420,7 @@ def customer_price_list(
                 "label": "سعر عام (كرت المنتج)",
                 "unit_price": str(p.sale_price),
                 "source_type": "PRODUCT",
+                "kind": "card",
                 "document_id": None,
                 "invoice_number": None,
             })

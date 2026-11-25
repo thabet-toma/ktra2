@@ -65,7 +65,7 @@ def reserved_stock_rows(tenant_id: int, *, product_id=None, customer_id=None, da
 def guard_reserved_stock(invoice, lines, products_by_id) -> None:  # (3244)
 def guard_invoice_payments_before_unpost(invoice: SalesInvoice, *, action_label: str = "إلغاء ترحيل") -> None:  # (959)
 def last_sale_price(*, tenant_id: int, product_id: int, customer_id: int | None = None) -> dict:  # (2806)
-def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:  # (2841)
+def customer_price_list(*, tenant_id: int, customer_id: int) -> list[dict]:  # (2841) — يحمل كل عنصر في `prices` مفتاح `kind` (`last`/`lowest`/`quote`/`card`)
 def sales_cogs_map(*, tenant_id: int, invoice_ids) -> dict[tuple[int, int], dict]:  # يستهلكها core.reports (2685)
 def invoice_profits(*, tenant_id: int, branch=None, date_from=None, date_to=None, customer_id=None) -> dict:  # `sales/services/pricing.py` — أرباح الفواتير بتكلفة اللقطة، وتضمّ `totals` مفتاحَي `cost_variance` (رصيد حساب فروقات التكلفة الكلّي للفترة من `accounting/services.py` (`account_period_net`) — فيشمل عكوسات المرتجعات والقيود اليدوية) و`gross_profit` (أو `None` عند التصفية بـ`customer_id`)
 def dormant_customers(*, tenant_id: int, days: int | None = None) -> list[dict]:  # (226)

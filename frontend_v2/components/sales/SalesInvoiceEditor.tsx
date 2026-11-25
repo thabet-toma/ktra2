@@ -95,6 +95,7 @@ import { openInNewTab } from "../../utils/openInNewTab";
 import { productProfilePath } from "../../utils/entityLinks";
 import { availableOf, needsAlternative, stockAlternatives, stockBadgeFor } from "../../utils/stockBadge";
 import { getPickerFieldVisibility } from "../../utils/pickerFieldVisibility";
+import { pickSalesPickerPrices } from "../../utils/productPickerPrices";
 import { accountMatchesPurpose } from "../../utils/accountTree";
 import { entityPathForReference } from "../../utils/entityLinks";
 import { DeliverGoodsModal } from "./DeliverGoodsModal";
@@ -2579,22 +2580,25 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     else if (key === "line_discount") updateLine(row.key, { line_discount: value });
   };
 
-  /* task24: خريطة سعر العميل (آخر بيع/عرض سعر) لكامل الكتالوج — تُجلب دفعة واحدة
-     عند تغيّر العميل لعرض السعر داخل خيارات المنتقي بلا نقر. */
+  /* task24: خريطة أسعار العميل لكامل الكتالوج — تُجلب دفعة واحدة عند تغيّر
+     العميل لعرض «آخر» (آخر بيع لهذا العميل عبر `pickSalesPickerPrices`) داخل
+     خيارات المنتقي بلا نقر. */
   const [customerPriceMap, setCustomerPriceMap] = useState<
-    Map<number, { price: string; source: "last_invoice" | "quote" | "default"; prices?: any[] }>
+    Map<number, { prices?: any[] }>
   >(new Map());
   useEffect(() => {
     if (customerId === "" || !networkOnline) { setCustomerPriceMap(new Map()); return; }
     let cancelled = false;
+    // PICKER-COMPACT: مسح أسعار العميل السابق فوراً عند التبديل كي لا تظهر أثناء جلب الجديد.
+    setCustomerPriceMap(new Map());
     getCustomerPriceList(customerId)
       .then((rows) => {
         if (cancelled) return;
-        const m = new Map<number, { price: string; source: "last_invoice" | "quote" | "default"; prices?: any[] }>();
+        const m = new Map<number, { prices?: any[] }>();
         for (const r of rows) {
           // #147: وجودُ السعر لا كونُه موجباً — صفرٌ مسجَّل سعرٌ حقيقيّ (القاعدة في المصدر).
           if (hasRecordedCustomerPrice(r.price)) {
-            m.set(r.product_id, { price: r.price, source: r.source, prices: r.prices });
+            m.set(r.product_id, { prices: r.prices });
           }
         }
         setCustomerPriceMap(m);
@@ -2617,44 +2621,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
   const productOptions = useMemo(
     () => products.map((p) => {
-      // task24: السعر المقترح يظهر داخل الخيار مباشرة (بلا نقر): آخر بيع/عرض سعر
-      // لهذا العميل من خريطة العميل، وإلا سعر البيع الافتراضي للمنتج.
+      // PICKER-COMPACT: السطر الثاني يعرض «أقل شراء (آخر ٥)» (خلف زرّ العين فقط)
+      // و«آخر» (آخر بيع لهذا العميل، أو «آخر —» عند غيابه) دون بطاقة الصنف أو العرض.
+      // تسعير السطر عند الاختيار يبقى بمنطقه المستقل في onSelectProduct.
       const cp = customerPriceMap.get(p.id);
-      // #133: السعر التقديري للشراء (أقلّ شراء ضمن آخر ٥) — حقلٌ مستقلّ عن
-      // سعر البيع أعلاه. غيابٌ خلف زرّ العين المغلق يعني عدم تمرير الحقل
-      // أصلاً إلى `KitAutocomplete` (لا فحصاً ثانياً هناك). قيمة `null` (لا
-      // شراء مرحَّل بعد) تُعرض «—» صراحةً — ليست صفراً وليست تكلفة.
-      const indicativePurchasePrice = pickerVisibility.indicativePurchasePrice
-        ? {
-            value:
-              p.indicative_purchase_price != null
-                ? formatMoney(Number(p.indicative_purchase_price))
-                : "—",
-            label: p.indicative_purchase_price_source || "",
-          }
-        : undefined;
-      let price: string | undefined;
-      let priceLabel: string | undefined;
-      let prices: any[] | undefined;
-      if (cp) {
-        price = formatMoney(Number(cp.price));
-        priceLabel = cp.source === "quote" ? "عرض سعر" : cp.source === "default" ? "سعر عام" : "آخر بيع";
-        prices = cp.prices?.map((pr: any) => ({
-          label: pr.label,
-          value: formatMoney(Number(pr.unit_price)),
-          link: pr.document_id ? `/sales/invoices/${pr.document_id}` : undefined,
-        }));
-      } else if (p.sale_price != null && p.sale_price !== "" && Number(p.sale_price) > 0) {
-        // بلا عميل مختار (أو بلا أي سعر خاص به): السعر العام من كرت المنتج.
-        price = formatMoney(Number(p.sale_price));
-        priceLabel = "سعر عام";
-      } else if (p.online_price != null && p.online_price !== "" && Number(p.online_price) > 0) {
-        price = formatMoney(Number(p.online_price));
-        priceLabel = "افتراضي";
-      } else {
-        // لا آخر بيع لهذا العميل ولا عرض سعر ولا سعر عام.
-        priceLabel = "بدون سعر";
-      }
+      const pickerPrices = pickSalesPickerPrices(
+        cp?.prices,
+        p.indicative_purchase_price,
+        pickerVisibility.indicativePurchasePrice,
+        p.indicative_purchase_price_source,
+      );
       return {
         id: p.id,
         label: formatProductPrimaryName(p),
@@ -2672,10 +2648,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
               ? `الرصيد: ${fmt(onHand)} · محجوز: ${fmt(reserved)} · المتاح للبيع: ${fmt(availableForSale(onHand, entry))}`
               : `الرصيد: ${fmt(onHand)}`;
           })(),
-        price,
-        priceLabel,
-        prices,
-        indicativePurchasePrice,
+        prices: [pickerPrices.last],
+        indicativePurchasePrice: pickerPrices.lowestPurchase,
         // T-SEARCH: رقم المنتج وباركوده يُبحَث فيهما ولا يُعرضان — كانا يصلان
         // الشاشة في البيانات ولا يجدهما البحث المدمج أبداً، فيضطرّ البائع لفتح
         // الفهرس الكامل لكل مسحة باركود.
@@ -2708,6 +2682,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           );
         })()}
         options={productOptions}
+        twoLineOptions
         disabled={readOnly}
         placeholder={`اكتب اسم ال${term("line.item")}…`}
         onPick={(id) => {

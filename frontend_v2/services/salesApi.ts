@@ -728,6 +728,7 @@ export type CustomerPriceRow = {
     label: string;
     unit_price: string;
     source_type: string;
+    kind?: "last" | "lowest" | "quote" | "card";
     document_id: number | null;
     invoice_number: string | null;
   }>;

@@ -18,6 +18,7 @@ export interface KitPriceInfo {
   label: string;
   value: string;
   link?: string;
+  isEmpty?: boolean;
 }
 
 export interface KitAutocompleteOption {
@@ -77,6 +78,9 @@ export interface KitAutocompleteProps {
   /** T-SEARCH: عند تجاوز المطابقات السقف يظهر صفّ «+N أخرى» يستدعيها
    *  بالاستعلام الحالي — عادةً لفتح الفهرس الكامل مُصفّىً مسبقاً. */
   onShowMore?: (query: string) => void;
+  /** PICKER-COMPACT: تخطيط سطرين اختياري (الاسم كاملاً في الأول، والرصيد
+   *  والأسعار في الثاني) — مُفعَّل في منتقي المنتج بالفاتورتين فقط. */
+  twoLineOptions?: boolean;
 }
 
 const MAX_DEFAULT = 8;
@@ -117,6 +121,7 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
   maxResults = MAX_DEFAULT,
   onShowMore,
   onTextChange,
+  twoLineOptions = false,
 }) => {
   const { visible: showPrices } = usePriceVisibility(); // خصوصية: إخفاء الأسعار أمام الزبون
   const [query, setQuery] = useState<string | null>(null); // null = غير مفتوح، يعرض value
@@ -141,7 +146,8 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
   const reposition = () => {
     const r = inputRef.current?.getBoundingClientRect();
     if (!r) return;
-    const width = Math.max(r.width, 280);
+    // حقلٌ أعرض من الشاشة (عمودٌ عريض في جدولٍ يتمرّر أفقياً) لا يمدّ القائمة خارجها
+    const width = Math.min(Math.max(r.width, 280), window.innerWidth - 8);
     // RTL: نحاذي حافة الحقل اليمنى ونمنع الخروج عن يسار الشاشة
     const left = Math.max(4, Math.min(r.right - width, window.innerWidth - width - 4));
     setPos({ top: r.bottom + 2, left, width });
@@ -226,7 +232,7 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
       {open && pos && createPortal(
         <div
           ref={popRef}
-          className="ktra-autocomplete-pop"
+          className={`ktra-autocomplete-pop${twoLineOptions ? ' ktra-autocomplete-pop--twoline' : ''}`}
           role="listbox"
           dir="rtl"
           style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
@@ -250,7 +256,7 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
                 {opt.badge && (
                   <span
                     title={opt.badge.title}
-                    className={`shrink-0 rounded px-1 py-px text-[10px] font-semibold border ${
+                    className={`ktra-autocomplete-badge shrink-0 rounded px-1 py-px text-[10px] font-semibold border ${
                       opt.badge.tone === 'danger'
                         ? 'bg-[var(--ktra-danger-bg)] border-[var(--ktra-danger-bd)] text-[var(--ktra-danger)]'
                         : 'bg-[var(--ktra-warn-bg)] border-[var(--ktra-warn-bd)] text-[var(--ktra-warn-fg)]'
@@ -265,6 +271,13 @@ export const KitAutocomplete: React.FC<KitAutocompleteProps> = ({
                 {!showPrices ? null : opt.prices && opt.prices.length > 0 ? (
                   <div className="flex gap-2 items-center ml-auto">
                     {opt.prices.map((p, idx) => {
+                      if (p.isEmpty) {
+                        return (
+                          <span key={idx} className="ktra-autocomplete-price ktra-autocomplete-price--none">
+                            {p.label} {p.value}
+                          </span>
+                        );
+                      }
                       const content = (
                         <span className="ktra-autocomplete-price !ml-0" title={p.label}>
                           {p.value}

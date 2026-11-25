@@ -765,6 +765,7 @@ export const purchaseInvoiceApi = {
       unit_price: string;
       source_type: string;
       source_label: string;
+      kind?: "last" | "lowest" | "avg_cost";
       document_id: number | null;
     }>;
   }>> => {

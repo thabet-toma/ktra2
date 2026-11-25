@@ -65,7 +65,7 @@ import {
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
 import { applyImportUnitCosts, importCostRows, importFinalUnitCost, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase } from "@/utils/importPayment";
-import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
+import { pickPurchasePickerPrices } from "@/utils/productPickerPrices";
 import { inventoryApi } from "@/services/inventoryApi";
 import { getReservedStock, type ReservedStockRow } from "@/services/salesApi";
 import { buildReservationIndex, totalReserved, availableForSale } from "@/utils/reservedStock";
@@ -1817,28 +1817,35 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     </button>
   );
 
-  /* task24: خريطة سعر الشراء المقترح (آخر/أقل شراء أو متوسط التكلفة) لكامل
-     الكتالوج — تُجلب دفعة واحدة لعرض السعر داخل خيارات المنتقي بلا نقر.
-     تُعاد الجلبة عند تغيّر المورد: «آخر شراء» يُحصر بمورد الفاتورة بينما «أقل
-     شراء» يبقى عاماً لكل الموردين. */
+  /* task24: خريطة أسعار الشراء لكامل الكتالوج — تُجلب دفعة واحدة لعرض «آخر
+     شراء» داخل خيارات المنتقي بلا نقر. يُعرض «آخر شراء» من مورد الفاتورة فقط
+     (عبر `pickPurchasePickerPrices`)، وتُعاد الجلبة عند تغيّر المورد. */
   const [purchasePriceMap, setPurchasePriceMap] = useState<
-    Map<number, { price: string; label: string; prices?: any[] }>
+    Map<number, { prices?: any[] }>
   >(new Map());
   useEffect(() => {
+    if (!formData.supplierId) {
+      setPurchasePriceMap(new Map());
+      return;
+    }
     let cancelled = false;
+    // PICKER-COMPACT: مسح نتائج المورد السابق فوراً عند التبديل أو عند خطأ الجلب.
+    setPurchasePriceMap(new Map());
     purchaseInvoiceApi
-      .priceList(formData.supplierId || null)
+      .priceList(formData.supplierId)
       .then((rows) => {
         if (cancelled) return;
-        const m = new Map<number, { price: string; label: string; prices?: any[] }>();
+        const m = new Map<number, { prices?: any[] }>();
         for (const r of rows) {
           if (r.unit_price != null && Number(r.unit_price) > 0) {
-            m.set(r.product_id, { price: r.unit_price, label: r.source_label, prices: r.prices });
+            m.set(r.product_id, { prices: r.prices });
           }
         }
         setPurchasePriceMap(m);
       })
-      .catch(() => { /* بلا تاريخ شراء — تُعرض الخيارات بلا سعر */ });
+      .catch(() => {
+        if (!cancelled) setPurchasePriceMap(new Map());
+      });
     return () => { cancelled = true; };
   }, [formData.supplierId]);
 
@@ -1897,19 +1904,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         // ولا تُعرض — وهي ما يكتبه المشتري فعلاً وقت الطلب.
         keywords: [it.barcode, it.modelNumber, it.supplierCodes]
           .filter(Boolean).join(" ").toLowerCase(),
-        price: pp ? formatMoney(Number(pp.price)) : undefined,
-        // لا آخر/أقل شراء ولا متوسط تكلفة → نص «بدون سعر» بدل الفراغ.
-        priceLabel: pp ? pp.label : "بدون سعر",
-        // ISSUE #113: «أقل شراء» بالعملة الأساسية بينما «آخر شراء» بعملة
-        // الفاتورة المصدر — بلا تمييز يبدو الأقلّ معطوباً لمن يشتري بعملة
-        // غير الأساسية. buildPurchasePriceHintChips وحدها تبني هذه الرقاقات
-        // (مصدرٌ واحد يشاركه منتقي بند الطلبية).
-        prices: buildPurchasePriceHintChips(pp?.prices, {
-          invoiceLink: (id) => `/purchase-invoices/${id}`,
-        }).map(({ label, value, link }) => ({ label, value, link: link ?? undefined })),
+        // PICKER-COMPACT: «آخر شراء» من مورد الفاتورة وحده (أو «آخر —» عند غيابه)،
+        // دون «أقل شراء» ودون سقوط إلى متوسط التكلفة أو سعر الكرت.
+        prices: [
+          pickPurchasePickerPrices(pp?.prices, Boolean(formData.supplierId), {
+            invoiceLink: (id) => `/purchase-invoices/${id}`,
+          }),
+        ],
       };
     }),
-    [allDbItems, purchasePriceMap, reservationIndex, pickerVisibility],
+    [allDbItems, purchasePriceMap, reservationIndex, pickerVisibility, formData.supplierId],
   );
 
   /** T-SEARCH: المورّد يُبحَث باسمه وهاتفه ورقمه — مرآة منتقي العميل. */
@@ -1967,6 +1971,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       <KitAutocomplete
         value={row.name || ""}
         options={itemOptions}
+        twoLineOptions
         disabled={effectiveReadOnly}
         placeholder="اكتب اسم المنتج…"
         onPick={async (id) => {

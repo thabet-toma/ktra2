@@ -631,3 +631,42 @@ def test_last_purchase_bulk_query_count_is_bounded(
     with django_assert_max_num_queries(2):
         result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
     assert len(result) == len(products)
+
+
+def test_price_list_excludes_purchase_returns(env):
+    """PICKER-COMPACT: مستند المرتجع المرحَّل (is_return=True) لا يُحتسب «آخر شراء»."""
+    tenant, ils, _usd, sup, product = env
+    _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    ret = _posted_pi(tenant, sup, ils, product, number="PRET-1", date="2026-06-20", price=55)
+    ret.is_return = True
+    ret.save(update_fields=["is_return"])
+
+    out = purchase_price_list(tenant_id=tenant.TenantID, supplier_id=sup.id)
+    last_entry = next(
+        p for p in out[product.id]["prices"] if p.get("kind") == "last"
+    )
+    assert Decimal(last_entry["unit_price"]) == Decimal("100.0000")
+    assert Decimal(out[product.id]["unit_price"]) == Decimal("100.0000")
+
+
+def test_price_list_includes_kind_for_last_lowest_and_avg_cost(env):
+    """PICKER-COMPACT: كل عنصر في prices يحمل kind الصحيح (last/lowest/avg_cost)."""
+    tenant, ils, _usd, sup_a, product = env
+    sup_b = Partner.objects.create(tenant=tenant, name="مورد ب", partner_type="Supplier")
+    _posted_pi(tenant, sup_a, ils, product, number="A-1", date="2026-06-01", price=100)
+    _posted_pi(tenant, sup_b, ils, product, number="B-1", date="2026-06-15", price=80)
+    no_history = Product.objects.create(
+        tenant=tenant, sku="PPR-AVG", name_ar="بلا شراء", quantity_on_hand=0, avg_cost=Decimal("42"))
+
+    out = purchase_price_list(tenant_id=tenant.TenantID, supplier_id=sup_a.id)
+    by_kind = {p["kind"]: p for p in out[product.id]["prices"]}
+    assert set(by_kind.keys()) == {"last", "lowest"}
+    assert Decimal(by_kind["last"]["unit_price"]) == Decimal("100.0000")
+    assert by_kind["last"]["source_label"] == "آخر شراء من المورد"
+    assert Decimal(by_kind["lowest"]["unit_price"]) == Decimal("80.0000")
+    assert by_kind["lowest"]["source_label"] == "أقل شراء (آخر ٥)"
+
+    avg_prices = out[no_history.id]["prices"]
+    assert [p["kind"] for p in avg_prices] == ["avg_cost"]
+    assert avg_prices[0]["source_type"] == "PRODUCT_AVG_COST"
+    assert Decimal(avg_prices[0]["unit_price"]) == Decimal("42.0000")

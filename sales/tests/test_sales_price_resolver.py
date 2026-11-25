@@ -243,3 +243,61 @@ def test_exclude_quotation_id_falls_through_to_next_rung(env):
         tenant_id=tenant.TenantID, customer_id=c1.id,
         exclude_quotation_id=quotation.id) if r["product_id"] == product.id)
     assert Decimal(row["price"]) == Decimal("150")
+
+
+def test_customer_price_list_includes_kind_for_all_sources(env):
+    """PICKER-COMPACT: كل عنصر في prices يحمل kind الصحيح (last/lowest/quote/card)
+    مع الحفاظ على الترتيب وsource_type والسعر المختار دون تغيير."""
+    from sales.models import CustomerProductQuote, SalesQuotation, SalesQuotationLine
+    from sales.services import customer_price_list
+
+    tenant, ils, _usd, c1, _c2, p_inv = env
+    p_sq = Product.objects.create(
+        tenant=tenant, sku="SPR-SQ", name_ar="منتج عرض", quantity_on_hand=10, avg_cost=Decimal("5"))
+    p_cq = Product.objects.create(
+        tenant=tenant, sku="SPR-CQ", name_ar="منتج عرض يدوي", quantity_on_hand=10, avg_cost=Decimal("5"))
+    p_card = Product.objects.create(
+        tenant=tenant, sku="SPR-CARD", name_ar="منتج كرت", quantity_on_hand=10,
+        avg_cost=Decimal("5"), sale_price=Decimal("220"))
+
+    # 1) فواتير بيع: الأقدم أرخص (lowest) والأحدث أغلى (last)
+    inv_old = _post(tenant, ils, c1, p_inv, number="S-OLD", date="2026-06-01", price=80)
+    inv_new = _post(tenant, ils, c1, p_inv, number="S-NEW", date="2026-06-15", price=120)
+
+    # 2) عرض من واجهة العروض (SalesQuotationLine)
+    q = SalesQuotation.objects.create(
+        tenant=tenant, quotation_number="Q-KIND", customer=c1,
+        quotation_date="2026-06-10", currency=ils)
+    SalesQuotationLine.objects.create(
+        tenant=tenant, quotation=q, product=p_sq, quantity=Decimal("1"), unit_price=Decimal("175"))
+
+    # 3) عرض يدوي في كرت الزبون (CustomerProductQuote)
+    CustomerProductQuote.objects.create(
+        tenant=tenant, customer=c1, product=p_cq, unit_price=Decimal("160"))
+
+    rows = {
+        r["product_id"]: r
+        for r in customer_price_list(tenant_id=tenant.TenantID, customer_id=c1.id)
+    }
+
+    inv_prices = rows[p_inv.id]["prices"]
+    assert [p["kind"] for p in inv_prices] == ["last", "lowest"]
+    assert [p["source_type"] for p in inv_prices] == ["SALES_INVOICE", "SALES_INVOICE"]
+    assert inv_prices[0]["document_id"] == inv_new.id
+    assert inv_prices[1]["document_id"] == inv_old.id
+    assert Decimal(rows[p_inv.id]["price"]) == Decimal("120")
+
+    sq_prices = rows[p_sq.id]["prices"]
+    assert [p["kind"] for p in sq_prices] == ["quote"]
+    assert sq_prices[0]["source_type"] == "QUOTE"
+    assert Decimal(rows[p_sq.id]["price"]) == Decimal("175")
+
+    cq_prices = rows[p_cq.id]["prices"]
+    assert [p["kind"] for p in cq_prices] == ["quote"]
+    assert cq_prices[0]["source_type"] == "QUOTE"
+    assert Decimal(rows[p_cq.id]["price"]) == Decimal("160")
+
+    card_prices = rows[p_card.id]["prices"]
+    assert [p["kind"] for p in card_prices] == ["card"]
+    assert card_prices[0]["source_type"] == "PRODUCT"
+    assert Decimal(rows[p_card.id]["price"]) == Decimal("220")

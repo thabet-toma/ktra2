@@ -237,9 +237,13 @@ def purchase_price_list(
     يُرجع {product_id: {"unit_price", "source_type", "source_label", "prices"}}.
     `unit_price` هو **آخر** سعر شراء (وهو ما تُعبَّأ به الخلية)، و`prices` تعرض
     «آخر شراء» و«أقل شراء» معاً دائماً عند وجود تاريخ (بصرف النظر عن الاستراتيجية).
+    كل مدخل في `prices` يحمل `{"unit_price", "source_type", "source_label",
+    "kind", "document_id"}`، و`kind` واحدٌ من `last` («آخر شراء») و`lowest`
+    («أقل شراء») و`avg_cost` («متوسط التكلفة») — الواجهة تفلتر عليه لا على النص.
     `supplier_id` (اختياري): «آخر شراء» يُحصر بذلك المورد وحده بوسم «آخر شراء من
     المورد»، بينما «أقل شراء» يبقى عاماً عبر كل الموردين؛ وإن لم يسبق الشراء من
-    هذا المورد تُعبَّأ الخلية بأقل سعر عام.
+    هذا المورد تُعبَّأ الخلية بأقل سعر عام. مستندات مرتجع الشراء (`is_return`)
+    مستثناة من «آخر شراء».
     «آخر شراء» أحادي العملة كما سُجِّل — تحويل العملة لكل سطر يبقى في
     `resolve_purchase_price`. أما «أقل شراء» (ISSUE #111/#133) فبالعملة
     **الأساسية** مُحوَّلاً بسعر صرف فاتورته هو (لا سعر اليوم)، ومحصوراً بآخر
@@ -257,6 +261,7 @@ def purchase_price_list(
         PurchaseInvoiceItem.objects.filter(
             invoice__tenant_id=tenant_id,
             invoice__is_posted=True,
+            invoice__is_return=False,
             unit_price__gt=0,
         )
         .select_related("invoice")
@@ -275,6 +280,7 @@ def purchase_price_list(
                 "unit_price": str(unit.quantize(_UNIT_Q)),
                 "source_type": "PURCHASE_INVOICE",
                 "source_label": "آخر شراء من المورد" if supplier_id else "آخر شراء",
+                "kind": "last",
                 "document_id": item.invoice_id,
             }
 
@@ -295,6 +301,7 @@ def purchase_price_list(
                     "unit_price": str(cost.quantize(_UNIT_Q)),
                     "source_type": "PRODUCT_AVG_COST",
                     "source_label": "متوسط التكلفة",
+                    "kind": "avg_cost",
                     "document_id": None,
                 },
             }
@@ -314,7 +321,7 @@ def purchase_price_list(
         # (unit_price) هي آخر سعر إن وُجد، وإلا أقل سعر (بالأساسية). لا تكرار:
         # إن كان «أقل شراء» نفس مستند «آخر شراء» تُعرض رقاقة واحدة.
         if lowest and not (last and last["document_id"] == lowest["document_id"]):
-            prices.append(lowest)
+            prices.append({**lowest, "kind": "lowest"})
 
         if prices:
             final_result[pid] = {

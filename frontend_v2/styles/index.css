@@ -1199,6 +1199,42 @@ tbody td {
 }
 :root[data-skin] .ktra-autocomplete-info:hover { background: var(--ktra-info-hover-bg); border-color: var(--ktra-info-hover-bd); }
 
+/* PICKER-COMPACT: تخطيط السطرين الاختياري لقائمة بحث المنتج في فاتورتَي البيع والشراء فقط */
+:root[data-skin] .ktra-autocomplete-pop--twoline .ktra-autocomplete-main {
+  flex-wrap: wrap;
+  row-gap: 3px;
+  column-gap: 6px;
+}
+:root[data-skin] .ktra-autocomplete-pop--twoline .ktra-autocomplete-label {
+  flex: 1 0 100%;
+  width: 100%;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.35;
+}
+:root[data-skin] .ktra-autocomplete-pop--twoline .ktra-autocomplete-sub {
+  font-size: 10.5px;
+  font-weight: 400;
+  max-width: none;
+  white-space: normal;
+}
+:root[data-skin] .ktra-autocomplete-pop--twoline .ktra-autocomplete-price {
+  font-size: 10.5px;
+  font-weight: 400;
+  margin-inline-start: 0;
+}
+:root[data-skin] .ktra-autocomplete-pop--twoline .ktra-autocomplete-price-src {
+  font-size: 10px;
+  font-weight: 400;
+}
+:root[data-skin] .ktra-autocomplete-pop--twoline .ktra-autocomplete-badge {
+  font-weight: 400;
+}
+
 /* DEF-005: شارة مصدر السعر المقترح على سطر الفاتورة */
 :root[data-skin] .ktra-price-badge {
   flex: 0 0 auto; font-size: 10px; line-height: 1; white-space: nowrap;
