@@ -2700,6 +2700,11 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
 
     logger = logging.getLogger(__name__)
 
+    if invoice.is_return:
+        raise ValidationError(
+            "لا يُستلَم مستند مرتجع — المرتجع يُخرج البضاعة من المخزن، لا يُدخلها."
+        )
+
     is_import = bool(invoice.deal_id or invoice.shipment_id or invoice.clearance_id)
     if is_import and not invoice.is_posted:
         raise ValidationError(

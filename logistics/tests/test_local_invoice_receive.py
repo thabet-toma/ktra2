@@ -353,3 +353,52 @@ class LocalInvoiceReceiveTest(APITestCase):
         assert "مكرَّر" in res.json()["detail"]
         item.refresh_from_db()
         assert item.quantity == Decimal("4.0000")
+
+    # ── B2 RECEIVE-RETURN-GUARD: رفض استلام مستند المرتجع ─────────────────
+
+    def test_receive_service_rejects_purchase_return_draft_and_posted(self):
+        """استدعاء receive_purchase_invoice مباشرةً على مستند مرتجع (مسودة أو مرحّل) يُرفض بلا حركة ولا قيد."""
+        from django.core.exceptions import ValidationError
+        from logistics.services import receive_purchase_invoice
+        import pytest
+
+        for is_posted in (False, True):
+            ret, item = self._make_invoice(qty="3", price="100")
+            ret.is_return = True
+            ret.is_posted = is_posted
+            ret.save(update_fields=["is_return", "is_posted"])
+
+            mv_before = StockMovement.objects.count()
+            jh_before = JournalHeader.objects.count()
+
+            with pytest.raises(ValidationError, match="مرتجع"):
+                receive_purchase_invoice(
+                    ret,
+                    lines=[{"item_id": item.pk, "quantity": Decimal("3"), "warehouse_id": self.warehouse.pk}],
+                    user=self.user,
+                )
+
+            assert StockMovement.objects.count() == mv_before
+            assert JournalHeader.objects.count() == jh_before
+
+    def test_receive_api_rejects_purchase_return(self):
+        """POST /receive/ على مستند مرتجع يردّ 400 بالرسالة العربية ولا ينشئ حركة أو قيداً."""
+        for is_posted in (False, True):
+            ret, item = self._make_invoice(qty="2", price="100")
+            ret.is_return = True
+            ret.is_posted = is_posted
+            ret.save(update_fields=["is_return", "is_posted"])
+
+            mv_before = StockMovement.objects.count()
+            jh_before = JournalHeader.objects.count()
+
+            res = self.client.post(
+                f"/api/logistics/purchase-invoices/{ret.pk}/receive/",
+                {"lines": [{"item_id": item.pk, "quantity": 2, "warehouse_id": self.warehouse.pk}]},
+                format="json",
+                **self._auth(),
+            )
+            assert res.status_code == 400, res.content
+            assert "مرتجع" in res.json().get("error", "")
+            assert StockMovement.objects.count() == mv_before
+            assert JournalHeader.objects.count() == jh_before
