@@ -159,6 +159,7 @@ def resolve_purchase_price(
     qs = PurchaseInvoiceItem.objects.filter(
         invoice__tenant_id=tenant_id,
         invoice__is_posted=True,
+        invoice__is_return=False,
         product_id=product_id,
     ).select_related("invoice", "invoice__currency", "line_currency")
 
@@ -388,6 +389,7 @@ def _purchase_lowest_prices_base_currency(
     qs = PurchaseInvoiceItem.objects.filter(
         invoice__tenant_id=tenant_id,
         invoice__is_posted=True,
+        invoice__is_return=False,
         unit_price__gt=0,
     )
     if product_ids is not None:
@@ -488,6 +490,7 @@ def last_purchase_prices_base_currency(
     qs = PurchaseInvoiceItem.objects.filter(
         invoice__tenant_id=tenant_id,
         invoice__is_posted=True,
+        invoice__is_return=False,
         unit_price__gt=0,
     )
     if product_ids is not None:

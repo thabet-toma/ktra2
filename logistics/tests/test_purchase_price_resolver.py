@@ -670,3 +670,137 @@ def test_price_list_includes_kind_for_last_lowest_and_avg_cost(env):
     assert [p["kind"] for p in avg_prices] == ["avg_cost"]
     assert avg_prices[0]["source_type"] == "PRODUCT_AVG_COST"
     assert Decimal(avg_prices[0]["unit_price"]) == Decimal("42.0000")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# PRICE-EXCL-RETURNS — مستندات مرتجع الشراء (is_return=True) لا تُحتسَب شراءً
+# ──────────────────────────────────────────────────────────────────────────
+def _posted_return(tenant, supplier, currency, product, *, number, date, price):
+    inv = _posted_pi(tenant, supplier, currency, product, number=number, date=date, price=price)
+    inv.is_return = True
+    inv.save(update_fields=["is_return"])
+    return inv
+
+
+def test_resolve_last_purchase_without_supplier_excludes_returns(env):
+    """1a: آخر شراء بلا مورد يتجاهل المرتجع الأحدث ويُعيد الشراء الحقيقي الأقدم."""
+    tenant, ils, _usd, sup, product = env
+    pur = _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    _posted_return(tenant, sup, ils, product, number="PRET-1", date="2026-06-20", price=55)
+
+    data = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE)
+    assert Decimal(data["unit_price"]) == Decimal("100.0000")
+    assert data["source"]["document_id"] == pur.id
+    assert data["source"]["document_number"] == "P-1"
+
+
+def test_resolve_last_purchase_with_supplier_excludes_returns(env):
+    """1b: آخر شراء بمورد معيّن يتجاهل مرتجع المورد الأحدث ويُعيد شراءه الأقدم."""
+    tenant, ils, _usd, sup, product = env
+    pur = _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    _posted_return(tenant, sup, ils, product, number="PRET-1", date="2026-06-20", price=55)
+
+    data = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE, supplier_id=sup.id)
+    assert Decimal(data["unit_price"]) == Decimal("100.0000")
+    assert data["source"]["document_id"] == pur.id
+
+
+def test_resolve_lowest_purchase_excludes_returns(env):
+    """1c: أقل شراء يتجاهل المرتجع الأرخص ويُعيد الشراء الحقيقي."""
+    tenant, ils, _usd, sup, product = env
+    pur = _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    _posted_return(tenant, sup, ils, product, number="PRET-1", date="2026-06-15", price=40)
+
+    data = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LOWEST_PURCHASE)
+    assert Decimal(data["unit_price"]) == Decimal("100.0000")
+    assert data["source"]["document_id"] == pur.id
+
+
+def test_resolve_supplier_with_only_return_falls_back_to_global_lowest(env):
+    """1d: موردٌ له مرتجع فقط على المنتج يسقط إلى أقل شراء عام لا إلى المرتجع."""
+    tenant, ils, _usd, sup_a, product = env
+    sup_b = Partner.objects.create(tenant=tenant, name="مورد ب", partner_type="Supplier")
+    pur_a = _posted_pi(tenant, sup_a, ils, product, number="A-1", date="2026-06-01", price=90)
+    _posted_return(tenant, sup_b, ils, product, number="BRET-1", date="2026-06-20", price=30)
+
+    data = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE, supplier_id=sup_b.id)
+    assert Decimal(data["unit_price"]) == Decimal("90.0000")
+    assert data["strategy_used"] == PriceStrategy.LOWEST_PURCHASE
+    assert data["source"]["document_id"] == pur_a.id
+
+
+def test_indicative_purchase_prices_excludes_returns(env):
+    """1e: السعر التقديري يتجاهل المرتجع الأرخص ويُعيد الشراء الحقيقي."""
+    tenant, ils, _usd, sup, product = env
+    pur = _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    _posted_return(tenant, sup, ils, product, number="PRET-1", date="2026-06-15", price=30)
+
+    result = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("100.0000")
+    assert result[product.id]["document_id"] == pur.id
+
+
+def test_indicative_price_return_does_not_occupy_window_slot(env):
+    """1f: المرتجع الأحدث لا يحتلّ مقعداً في نافذة آخر ٥ مشتريات ولا يُسقط الخامسة."""
+    tenant, ils, _usd, sup, product = env
+    assert INDICATIVE_PRICE_INVOICE_WINDOW == 5
+    p1 = _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-01-01", price=50)
+    _posted_pi(tenant, sup, ils, product, number="P-2", date="2026-02-01", price=80)
+    _posted_pi(tenant, sup, ils, product, number="P-3", date="2026-03-01", price=90)
+    _posted_pi(tenant, sup, ils, product, number="P-4", date="2026-04-01", price=100)
+    _posted_pi(tenant, sup, ils, product, number="P-5", date="2026-05-01", price=110)
+    _posted_return(tenant, sup, ils, product, number="PRET-6", date="2026-06-01", price=120)
+
+    result = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("50.0000")
+    assert result[product.id]["document_id"] == p1.id
+
+
+def test_last_purchase_prices_base_currency_excludes_returns(env):
+    """1g: آخر سعر شراء دفعي يتجاهل المرتجع الأحدث ويُعيد الشراء الحقيقي الأقدم."""
+    tenant, ils, _usd, sup, product = env
+    pur = _posted_pi(tenant, sup, ils, product, number="P-1", date="2026-06-01", price=100)
+    _posted_return(tenant, sup, ils, product, number="PRET-1", date="2026-06-20", price=55)
+
+    result = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert Decimal(result[product.id]["unit_price"]) == Decimal("100.0000")
+    assert result[product.id]["document_id"] == pur.id
+
+
+def test_product_with_only_return_history_omitted_and_falls_back(env):
+    """1h: منتجٌ تاريخه المرحَّل مرتجعٌ فقط يغيب عن القاموسين ويسقط كأن لا تاريخ له."""
+    tenant, ils, _usd, sup, product = env
+    _posted_return(tenant, sup, ils, product, number="PRET-1", date="2026-06-20", price=55)
+
+    with_avg = Product.objects.create(
+        tenant=tenant, sku="PPR-RET-AVG", name_ar="بمتوسط",
+        quantity_on_hand=0, avg_cost=Decimal("42"))
+    _posted_return(tenant, sup, ils, with_avg, number="PRET-2", date="2026-06-20", price=77)
+
+    indicative = indicative_purchase_prices(tenant_id=tenant.TenantID)
+    last_map = last_purchase_prices_base_currency(tenant_id=tenant.TenantID)
+    assert product.id not in indicative
+    assert with_avg.id not in indicative
+    assert product.id not in last_map
+    assert with_avg.id not in last_map
+
+    blank_res = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=product.id,
+        strategy=PriceStrategy.LAST_PURCHASE)
+    assert blank_res["unit_price"] is None
+    assert blank_res["strategy_used"] is None
+
+    avg_res = resolve_purchase_price(
+        tenant_id=tenant.TenantID, product_id=with_avg.id,
+        strategy=PriceStrategy.LAST_PURCHASE)
+    assert Decimal(avg_res["unit_price"]) == Decimal("42.0000")
+    assert avg_res["strategy_used"] == PriceStrategy.DEFAULT
+    assert avg_res["source"]["document_type"] == "PRODUCT_AVG_COST"
