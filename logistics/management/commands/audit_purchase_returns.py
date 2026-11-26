@@ -26,6 +26,7 @@ from django.db.models import Count, Q, Sum
 from accounting.services import Account, JournalHeader, JournalLine
 from inventory.models import StockMovement
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+from logistics.purchase_return_basis import classify_return_product_group
 from logistics.services import (
     GR_IR_ACCOUNT_CODE,
     QTY,
@@ -818,51 +819,50 @@ class Command(BaseCommand):
             ret_q = _qq(p["ret_qty"])
             info = orig_info.get((oid, pid))
             if info is None:
+                cls = classify_return_product_group(
+                    prices=None, line_count=0, total_received=Decimal("0"), ret_qty=ret_q,
+                )
                 kind_absent += 1
                 orig_num = orig_nums.get(oid, f"#{oid}")
                 prod_name = p["product__name_ar"] or f"#{pid}"
                 exceptions.append((
                     1,
-                    ret_q,
+                    cls.ret_qty,
                     orig_num,
                     prod_name,
                     pid,
-                    "غير_موجود_بالأصل",
-                    ret_q,
-                    Decimal("0"),
+                    "+".join(cls.reason_labels),
+                    cls.ret_qty,
+                    cls.recv_qty,
                     oid,
                 ))
                 continue
 
-            recv_q = _qq(info["received"])
-            exc_a = len(info["prices"]) > 1
-            exc_same = info["line_count"] > 1 and len(info["prices"]) == 1
-            exc_b = ret_q > recv_q
-            if not exc_a and not exc_same and not exc_b:
+            cls = classify_return_product_group(
+                prices=info["prices"],
+                line_count=info["line_count"],
+                total_received=info["received"],
+                ret_qty=ret_q,
+            )
+            if cls.is_s6_deterministic:
                 deterministic += 1
                 continue
-            if exc_a:
+            if cls.exc_multi_price:
                 kind_a += 1
-            if exc_same:
+            if cls.exc_same_price_multi_line:
                 kind_same += 1
-            if exc_b:
+            if cls.exc_exceeds_received:
                 kind_b += 1
-            kinds = []
-            if exc_a:
-                kinds.append("أ:تعدد_أسعار")
-            if exc_same:
-                kinds.append("أسطر_متعددة_بسعر_واحد")
-            if exc_b:
-                kinds.append("ب:تجاوز_مستلم")
+            kinds = cls.reason_labels
             exceptions.append((
-                int(exc_a) + int(exc_same) + int(exc_b),
-                ret_q - recv_q,
+                int(cls.exc_multi_price) + int(cls.exc_same_price_multi_line) + int(cls.exc_exceeds_received),
+                cls.ret_qty - cls.recv_qty,
                 info["orig_num"],
                 info["prod_name"],
                 pid,
                 "+".join(kinds),
-                ret_q,
-                recv_q,
+                cls.ret_qty,
+                cls.recv_qty,
                 oid,
             ))
 

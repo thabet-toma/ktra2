@@ -1780,6 +1780,10 @@ class PartyRefundAllocation(models.Model):
         CustomerPayment, on_delete=models.CASCADE, null=True, blank=True,
         db_column="SourceCustomerPaymentID", related_name="refunds",
     )
+    source_purchase_return = models.ForeignKey(
+        "logistics.PurchaseInvoice", on_delete=models.CASCADE, null=True, blank=True,
+        db_column="SourcePurchaseReturnID", related_name="refunds",
+    )
     amount = models.DecimalField(
         max_digits=18, decimal_places=2, db_column="Amount", help_text="بعملة السند والمصدر")
     amount_base = models.DecimalField(max_digits=18, decimal_places=2, db_column="AmountBase")
@@ -1792,11 +1796,13 @@ class PartyRefundAllocation(models.Model):
                 name="refund_allocation_one_source",
                 condition=(
                     models.Q(source_note__isnull=False, source_supplier_payment__isnull=True,
-                             source_customer_payment__isnull=True)
+                             source_customer_payment__isnull=True, source_purchase_return__isnull=True)
                     | models.Q(source_note__isnull=True, source_supplier_payment__isnull=False,
-                               source_customer_payment__isnull=True)
+                               source_customer_payment__isnull=True, source_purchase_return__isnull=True)
                     | models.Q(source_note__isnull=True, source_supplier_payment__isnull=True,
-                               source_customer_payment__isnull=False)
+                               source_customer_payment__isnull=False, source_purchase_return__isnull=True)
+                    | models.Q(source_note__isnull=True, source_supplier_payment__isnull=True,
+                               source_customer_payment__isnull=True, source_purchase_return__isnull=False)
                 ),
             ),
         ]

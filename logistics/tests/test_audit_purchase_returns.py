@@ -620,6 +620,10 @@ def test_audit_purchase_returns_s6_backfill_exceptions_and_deterministic(env):
     assert "صنف-غير-مستلم" in s6
     assert "[أسطر_متعددة_بسعر_واحد]" in s6
     assert "[غير_موجود_بالأصل]" in s6
+    assert (
+        f"    PINV-S6 · «صنف-غائب-عن-الاصل» (#{product5.id}) · [غير_موجود_بالأصل] · "
+        "مرتجع=1.0000 · مستلم=0.0000\n"
+    ) in s6
 
 
 def test_audit_purchase_returns_s7_sales_invoice_old_path(env):

@@ -1161,3 +1161,87 @@ class ImportInvoiceSettlementTest(APITestCase):
         out = StringIO()
         call_command("report_import_off_cost_postings", "--tenant", str(self.tenant.pk), stdout=out)
         self.assertNotIn(inv.invoice_number, out.getvalue())
+
+    # ── PRET-M1 fix2: مرآة أساس العكس تطابق ترحيل الفاتورة الدولية الحقيقي ──────────
+    def _two_item_first_deal(self):
+        """صفقة الفاتورة الأولى ببندين (6×100 + 4×100 = 1000$) لتوزيعٍ فعليّ بين البنود."""
+        deal = self.deals[0]
+        first = deal.items.get()
+        LogisticsDealItem.objects.filter(pk=first.pk).update(quantity=D("6"), unit_price=D("100"))
+        product = Product.objects.create(
+            tenant=self.tenant, sku="SET-1B", name_ar="صنف 1ب",
+            quantity_on_hand=D("0"), avg_cost=D("0"))
+        LogisticsDealItem.objects.create(
+            deal=deal, product=product, quantity=D("4"), unit_price=D("100"))
+
+    def _journal_base_debit(self, inv, account_id):
+        agg = JournalLine.objects.filter(
+            tenant=self.tenant, journal_id=inv.journal_id, account_id=account_id,
+        ).aggregate(d=Sum("base_debit"))
+        return (agg["d"] or D("0")).quantize(Q2)
+
+    def test_basis_mirror_matches_posted_international_invoice(self):
+        """رسمٌ مرسمَل + عمولة تحويل + ضريبة 16% + ≥2 بند: أساس المرآة يطابق القيد المرحَّل
+        بالقرش، ومجموع `clearing_base` = مدين الوسيط 2110 (فرع `capitalize_all` للمرحَّلة)."""
+        from logistics.purchase_return_basis import basis_matches_journal, compute_invoice_line_basis
+        from logistics.services import _resolve_gr_ir_account
+
+        self._two_item_first_deal()
+        self._post_deal_payment_with_commission(self.deals[0], "10")  # 35 ₪
+        inv = self._release_and_import()[0]
+        self.assertEqual(inv.items.count(), 2)
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(tax_rate=D("16"), tax_type="percentage")
+        inv = PurchaseInvoice.objects.get(pk=inv.pk)
+        inv.fees.create(
+            tenant=self.tenant, description="رسم مرسمَل", amount=D("100"),
+            expense_account=Account.objects.get(tenant=self.tenant, code="5307"),
+            capitalize_to_inventory=True)
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
+        self.assertGreater(inv.tax_amount, 0)
+
+        basis = compute_invoice_line_basis(inv)
+        self.assertEqual(len(basis), 2)
+        matched, reason = basis_matches_journal(inv, basis)
+        self.assertTrue(matched, reason)
+
+        gr_ir = _resolve_gr_ir_account(self.tenant)
+        gr_ir_debit = self._journal_base_debit(inv, gr_ir.id)
+        clearing_sum = sum((b.clearing_base for b in basis.values()), D("0"))
+        self.assertEqual(clearing_sum, gr_ir_debit)
+        # الرسم والعمولة والضريبة داخل الرقم نفسه (لا مصروف ولا مدخلات)، فهو فوق البضاعة وحدها.
+        self.assertGreater(clearing_sum, sum((b.net_base for b in basis.values()), D("0")))
+        self.assertEqual(sum((b.tax_base for b in basis.values()), D("0")), D("0"))
+        self.assertEqual(self._journal_base_debit(
+            inv, Account.objects.get(tenant=self.tenant, code="1105").id), D("0.00"))
+        self.assertTrue(all(b.clearing_base > 0 for b in basis.values()))
+
+    def test_basis_mirror_matches_old_posting_with_input_vat(self):
+        """ترحيلٌ قديم (قبل القرار): الضريبة مدخلاتٌ في 1105 والرسم مصروف ⇒ المرآة تقرأ القيد كما
+        رُحِّل (`import_invoice_capitalized_tax` للمرحَّلة) فتطابق بالقرش."""
+        from logistics.purchase_return_basis import basis_matches_journal, compute_invoice_line_basis
+        from logistics.services import _resolve_gr_ir_account
+
+        self._two_item_first_deal()
+        self._post_deal_payment_with_commission(self.deals[0], "10")
+        inv = self._release_and_import()[0]
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(tax_rate=D("16"), tax_type="percentage")
+        self.assertEqual(self._recalculate().status_code, 200)
+        PurchaseInvoice.objects.get(pk=inv.pk).fees.create(
+            tenant=self.tenant, description="رسم مصروف", amount=D("100"),
+            expense_account=Account.objects.get(tenant=self.tenant, code="5307"),
+            capitalize_to_inventory=False)
+        with mock.patch("logistics.services.import_invoice_capitalizes_all", return_value=False), \
+                mock.patch("logistics.services.capitalize_import_fees"):
+            inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
+        vat_account = Account.objects.get(tenant=self.tenant, code="1105")
+        vat_debit = self._journal_base_debit(inv, vat_account.id)
+        self.assertGreater(vat_debit, 0)
+
+        basis = compute_invoice_line_basis(inv)
+        self.assertEqual(len(basis), 2)
+        matched, reason = basis_matches_journal(inv, basis)
+        self.assertTrue(matched, reason)
+        self.assertEqual(sum((b.tax_base for b in basis.values()), D("0")), vat_debit)
+        gr_ir_debit = self._journal_base_debit(inv, _resolve_gr_ir_account(self.tenant).id)
+        self.assertEqual(sum((b.clearing_base for b in basis.values()), D("0")), gr_ir_debit)

@@ -2168,6 +2168,21 @@ class PurchaseInvoice(models.Model):
         db_column='OriginalInvoiceID', related_name='return_invoices',
         help_text='فاتورة الشراء الأصلية التي يُرجَع منها (للمراجيع).',
     )
+    RETURN_MODE_LEGACY_COMBINED = 'legacy_combined'
+    RETURN_MODE_INVOICE = 'invoice'
+    RETURN_MODE_CHOICES = [
+        (RETURN_MODE_LEGACY_COMBINED, 'مرتجع قديم مجمّع'),
+        (RETURN_MODE_INVOICE, 'مرتجع فاتورة'),
+    ]
+    return_mode = models.CharField(
+        max_length=20, choices=RETURN_MODE_CHOICES, default=RETURN_MODE_LEGACY_COMBINED,
+        db_column='ReturnMode',
+        help_text='نوع المرتجع (عند is_return=True): legacy_combined للقديم المجمّع، invoice لمرتجع الفاتورة.',
+    )
+    ship_goods_on_post = models.BooleanField(
+        default=True, db_column='ShipGoodsOnPost',
+        help_text='إخراج البضاعة المستلمة تلقائياً (بمرتجع إرسالية) عند ترحيل مرتجع الفاتورة.',
+    )
 
     # نوع الدفع: credit → تُقيّد على ذمم المورد (AP)، cash → تُقيّد على صندوق/بنك
     PAYMENT_TYPE_CREDIT = 'credit'
@@ -2293,6 +2308,39 @@ class PurchaseInvoiceItem(models.Model):
         'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
         db_column='ExpenseAccountID', related_name='purchase_invoice_item_expenses',
         help_text='حساب المصروف المخصص لهذا البند (إن وُجد) — يتخطى حساب المخزون الافتراضي',
+    )
+    # PRET-M1: تتبّع الكمية المرتجعة بالفاتورة وربط سطر المرتجع ببند الأصل، مع أساس العكس بالعملة الأساسية.
+    returned_quantity = models.DecimalField(
+        max_digits=18, decimal_places=4, default=0, db_column='ReturnedQuantity',
+        help_text='الكمية المرتجعة بفاتورة مرتجع من هذا البند (C)',
+    )
+    return_of_item = models.ForeignKey(
+        'self', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='ReturnOfItemID', related_name='return_lines',
+        help_text='بند الفاتورة الأصلية الذي يعكسه سطر المرتجع هذا',
+    )
+    posted_account = models.ForeignKey(
+        'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PostedAccountID', related_name='+',
+        help_text='الحساب المحاسبي الذي قُيِّد عليه البند بالترحيل (2110 أو 1104 أو المصروف)',
+    )
+    posted_net_base = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='PostedNetBase',
+    )
+    posted_tax_base = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='PostedTaxBase',
+    )
+    posted_clearing_base = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='PostedClearingBase',
+    )
+    returned_net_base = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='ReturnedNetBase',
+    )
+    returned_tax_base = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='ReturnedTaxBase',
+    )
+    returned_clearing_base = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='ReturnedClearingBase',
     )
 
     class Meta:
@@ -2563,6 +2611,14 @@ class PurchaseSettings(models.Model):
         (STRATEGY_LAST_PURCHASE, "آخر سعر شراء (أحدث فاتورة مرحَّلة)"),
         (STRATEGY_LOWEST_PURCHASE, "أقل سعر شراء (الأدنى تاريخياً)"),
     ]
+    RETURN_GOODS_ASK = "ask"
+    RETURN_GOODS_ALWAYS = "always"
+    RETURN_GOODS_NEVER = "never"
+    RETURN_GOODS_ON_POST_CHOICES = [
+        (RETURN_GOODS_ASK, "اسأل"),
+        (RETURN_GOODS_ALWAYS, "دائماً"),
+        (RETURN_GOODS_NEVER, "أبداً"),
+    ]
 
     id = models.AutoField(primary_key=True, db_column="PurchaseSettingsID")
     tenant = models.OneToOneField(
@@ -2606,6 +2662,22 @@ class PurchaseSettings(models.Model):
         default=True,
         db_column="ReceiveOnPost",
         help_text="إدخال بضاعة الفاتورة للمستودع تلقائياً عند الترحيل",
+    )
+    price_variance_account = models.ForeignKey(
+        Account,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        db_column="PriceVarianceAccountID",
+        related_name="purchase_settings_price_variance",
+        help_text="حساب فروقات أسعار الشراء؛ فارغ = حساب فروقات تكلفة المبيعات",
+    )
+    return_goods_on_post = models.CharField(
+        max_length=10,
+        choices=RETURN_GOODS_ON_POST_CHOICES,
+        default=RETURN_GOODS_ASK,
+        db_column="ReturnGoodsOnPost",
+        help_text="إخراج البضاعة المستلمة عند ترحيل مرتجع الفاتورة: اسأل / دائماً / أبداً",
     )
     # تسمية مستند الاستلام — لكل شركة عُرفها (إرسالية/إشعار استلام/مذكرة…).
     receipt_doc_label = models.CharField(
@@ -2976,6 +3048,218 @@ class PriceBoardPrice(models.Model):
 
     def __str__(self):
         return f"{self.board_item_id}×{self.board_supplier_id}={self.unit_price}"
+
+
+# ── PRET-M1: فصل مرتجعات الشراء (مرتجع الإرسالية + التخصيص + سجلّ الإسناد الخلفي) ──
+
+class GoodsReturn(models.Model):
+    """مرتجع إرسالية شراء (GRR-XXXX) — يعكس استلام البضاعة للمخزن دون المساس بذمّة المورد."""
+
+    STATUS_DRAFT = 'draft'
+    STATUS_POSTED = 'posted'
+    STATUS_VOID = 'void'
+    STATUS_CHOICES = [
+        (STATUS_DRAFT, 'مسودة'),
+        (STATUS_POSTED, 'مرحّل'),
+        (STATUS_VOID, 'ملغى'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='GoodsReturnID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='goods_returns',
+    )
+    branch = models.ForeignKey(
+        'tenants.Branch', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='BranchID', related_name='goods_returns',
+    )
+    return_number = models.CharField(max_length=50, db_column='ReturnNumber')
+    return_date = models.DateField(db_column='ReturnDate')
+    partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='PartnerID', related_name='goods_returns',
+    )
+    invoice = models.ForeignKey(
+        PurchaseInvoice, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='PurchaseInvoiceID', related_name='goods_returns',
+    )
+    receipt = models.ForeignKey(
+        GoodsReceipt, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='GoodsReceiptID', related_name='goods_returns',
+    )
+    journal = models.ForeignKey(
+        JournalHeader, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='JournalID', related_name='goods_returns',
+    )
+    status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default=STATUS_DRAFT,
+        db_column='Status',
+    )
+    auto_created_by = models.ForeignKey(
+        PurchaseInvoice, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='AutoCreatedByInvoiceID', related_name='auto_goods_returns',
+        help_text='مرتجع الفاتورة الذي أنشأ مرتجع الإرسالية هذا آلياً عند الترحيل',
+    )
+    notes = models.CharField(max_length=500, blank=True, default='', db_column='Notes')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='goods_returns',
+    )
+
+    class Meta:
+        db_table = 'purchase_module_goods_returns'
+        managed = True
+        ordering = ['-return_date', '-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['tenant', 'return_number'],
+                name='uniq_goods_return_number_per_tenant',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.return_number} — فاتورة {self.invoice_id or '—'}"
+
+
+class GoodsReturnLine(models.Model):
+    """بند مرتجع الإرسالية — يرتبط اختيارياً ببند الاستلام وبند الفاتورة وبحركة المخزون."""
+
+    id = models.AutoField(primary_key=True, db_column='GoodsReturnLineID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='goods_return_lines',
+    )
+    goods_return = models.ForeignKey(
+        GoodsReturn, on_delete=models.CASCADE,
+        db_column='GoodsReturnID', related_name='lines',
+    )
+    receipt_line = models.ForeignKey(
+        GoodsReceiptLine, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='GoodsReceiptLineID', related_name='return_lines',
+    )
+    item = models.ForeignKey(
+        PurchaseInvoiceItem, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='InvoiceItemID', related_name='goods_return_lines',
+    )
+    product = models.ForeignKey(
+        Product, on_delete=models.PROTECT,
+        db_column='ProductID', related_name='goods_return_lines',
+    )
+    warehouse = models.ForeignKey(
+        'inventory.Warehouse', on_delete=models.PROTECT, null=True, blank=True,
+        db_column='WarehouseID', related_name='goods_return_lines',
+    )
+    quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='Quantity')
+    clearing_unit_cost = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True,
+        db_column='ClearingUnitCost',
+    )
+    movement = models.ForeignKey(
+        'inventory.StockMovement', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='MovementID', related_name='goods_return_lines',
+    )
+
+    class Meta:
+        db_table = 'purchase_module_goods_return_lines'
+        managed = True
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(quantity__gt=0),
+                name='goods_return_line_qty_gt_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return f"GRRLine {self.id} return={self.goods_return_id}"
+
+
+class PurchaseReturnAllocation(models.Model):
+    """تخصيص مرتجع فاتورة الشراء على فاتورة شراء (الأصلية أو أخرى لنفس المورد)."""
+
+    id = models.AutoField(primary_key=True, db_column='PurchaseReturnAllocationID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='purchase_return_allocations',
+    )
+    purchase_return = models.ForeignKey(
+        PurchaseInvoice, on_delete=models.CASCADE,
+        db_column='PurchaseReturnID', related_name='return_allocations',
+    )
+    invoice = models.ForeignKey(
+        PurchaseInvoice, on_delete=models.PROTECT,
+        db_column='PurchaseInvoiceID', related_name='purchase_return_allocations',
+    )
+    amount = models.DecimalField(max_digits=18, decimal_places=2, db_column='Amount')
+    amount_base = models.DecimalField(max_digits=18, decimal_places=2, db_column='AmountBase')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'purchase_module_return_allocations'
+        managed = True
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name='purchase_return_alloc_amount_gt_zero',
+            ),
+            models.UniqueConstraint(
+                fields=['purchase_return', 'invoice'],
+                name='uniq_purchase_return_alloc_pair',
+            ),
+        ]
+        indexes = [
+            models.Index(fields=['tenant'], name='pret_alloc_tenant_idx'),
+        ]
+
+    def __str__(self):
+        return f"PurchaseReturnAllocation(ret={self.purchase_return_id}, inv={self.invoice_id}, amount={self.amount})"
+
+
+class PurchaseReturnBackfill(models.Model):
+    """سجلّ الإسناد الخلفي لمرتجعات الشراء القديمة وأساس الفواتير — يمكّن التراجع الدقيق."""
+
+    STATUS_APPLIED = 'applied'
+    STATUS_EXCEPTION = 'exception'
+    STATUS_ROLLED_BACK = 'rolled_back'
+    STATUS_CHOICES = [
+        (STATUS_APPLIED, 'مطبَّق'),
+        (STATUS_EXCEPTION, 'استثناء'),
+        (STATUS_ROLLED_BACK, 'متراجَع عنه'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='BackfillID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='purchase_return_backfills',
+    )
+    run_id = models.CharField(max_length=36, db_index=True, db_column='RunID')
+    unit_key = models.CharField(max_length=64, blank=True, default='', db_column='UnitKey')
+    invoice = models.ForeignKey(
+        PurchaseInvoice, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='PurchaseInvoiceID', related_name='backfill_records',
+    )
+    item = models.ForeignKey(
+        PurchaseInvoiceItem, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='InvoiceItemID', related_name='backfill_records',
+    )
+    source_return_item = models.ForeignKey(
+        PurchaseInvoiceItem, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SourceReturnItemID', related_name='source_backfill_records',
+    )
+    field = models.CharField(max_length=64, db_column='Field')
+    value_before = models.TextField(null=True, blank=True, db_column='ValueBefore')
+    value_after = models.TextField(null=True, blank=True, db_column='ValueAfter')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_column='Status')
+    reason = models.CharField(max_length=255, blank=True, default='', db_column='Reason')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'purchase_module_return_backfills'
+        managed = True
+
+    def __str__(self):
+        return f"Backfill({self.run_id}, inv={self.invoice_id}, {self.field}, {self.status})"
 
 
 # Automatically connect signals for the logistics app

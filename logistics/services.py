@@ -2606,6 +2606,16 @@ def next_goods_receipt_number(tenant_id, branch=None) -> str:
     return f"GRN-{seq:04d}"
 
 
+def next_goods_return_number(tenant_id, branch=None) -> str:
+    """رقم مرتجع الإرسالية التالي — عبر دفاتر الترقيم المركزية (GRR-0001)."""
+    from accounting.services import next_document_number
+
+    seq = next_document_number(
+        tenant_id, 'goods_return', branch_id=branch.id if branch else None,
+    )
+    return f"GRR-{seq:04d}"
+
+
 def create_goods_receipt_document(
     tenant, *, lines, invoice=None, partner=None, branch=None, user=None,
     receipt_date=None, notes='', supplier_ref='', auto_created=False, journal=None,
