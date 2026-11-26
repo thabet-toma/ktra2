@@ -372,3 +372,6 @@
 | 2026-11-26 | M0 البوّابات (المنسّق) | — | الهجرات No changes؛ sync_docs بلا تغيير؛ diff --check نظيف؛ الكاملة 8231 passed + الست البيئية. إيداع cfec1ce8 ودُفع. |
 | 2026-11-26 | M0 CI (45744610713) | — | **backend أحمر:** `lint-imports` كسر عقد «accounting.models ليس واجهة عامة» (`audit_purchase_returns` سطر 26). البوّابات المحلية لا تشغّل lint-imports (مثبّت خارج PATH: `%APPDATA%/Python/Python313/Scripts/lint-imports.exe`). القاعدة تمنع الإضافة لـignore_imports ← تصليح 4. |
 | 2026-11-26 | M0 تصليح 4 | Opus 5.5 high (وكيل فرعي) | سطر الاستيراد ← `accounting.services` (نمط `audit_deal_payment_currency`). `scratchpad/m0-fix4-brief.txt`. completed: قبلُ أحمر بالسطر نفسه، بعدُ «Contracts: 3 kept, 0 broken»؛ audit 22 passed؛ الفرق سطر واحد (تحقّقتُ بنفسي: lint-imports و22 passed وdiff --check). |
+| 2026-11-26 | M0 CI (45748923061) | — | أخضر: backend وfrontend وpwa-audit على `7356d336`. |
+| 2026-11-26 | M0 النشر (المنسّق) | — | `scratchpad/deploy-m0.sh`: DEPLOY_M0_DONE، health 200 محلياً والرابطان العامّان، NRestarts=0، لا هجرات معلّقة. |
+| 2026-11-26 | M0 تشغيل الإنتاج (المنسّق) | — | `audit_purchase_returns` قراءةً: 28 شركة؛ شركة 6: PRET=2/0، S6 حتمي=3 واستثناء=0، S2/S3/S4/S5/S7/S8 أصفار؛ 27 بلا مرتجعات. ثُبّت hash في CHANGELOG وكُتبت §10.1.1–§10.1.4 في الخطة. |
