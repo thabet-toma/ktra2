@@ -23,7 +23,7 @@ from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand
 from django.db.models import Count, Q, Sum
 
-from accounting.models import Account, JournalHeader, JournalLine
+from accounting.services import Account, JournalHeader, JournalLine
 from inventory.models import StockMovement
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
 from logistics.services import (
