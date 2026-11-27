@@ -16,7 +16,7 @@ from decimal import Decimal
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from accounting.models import Account, JournalLine
+from accounting.services import Account, JournalLine
 from logistics.models import PurchaseInvoice
 from logistics.purchase_return_basis import (
     basis_matches_journal,
