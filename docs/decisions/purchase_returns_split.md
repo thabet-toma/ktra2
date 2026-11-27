@@ -400,7 +400,7 @@ CONTEXT: logistics/services.py (post_purchase_return, _international_return_spli
 GOAL: ترحيل مرتجع الفاتورة الجديد بلا مخزون، مع الإخراج التلقائي والمتاح لكل بند.
 SUCCESS CRITERIA: اختبارات أولاً لكل حالةٍ مذكورة بقيودها الرقمية من §4 (2110 صفر بعد الجمع)، والرفض في 8،
   والدولي يدين 2110 لا 1104، وreturnable_lines بالأعمدة الخمسة لكل بند، وreceipt_status كامل عند R + C ≥ Q،
-  وإلغاء المجمّع يلغي GRR التلقائي، والقديم legacy_combined يبقى على مساره؛ `python -m pytest logistics/tests -q` ثم البوّابة الكاملة.
+  وإلغاء المجمّع يلغي GRR التلقائي، والقديم legacy_combined يبقى على مساره، وحارس §10.5: الإنشاء والترحيل يُرفضان حين لا يطابق الأساس القيد؛ `python -m pytest logistics/tests -q` ثم البوّابة الكاملة.
 CONSTRAINTS: select_for_update على البنود؛ العملة والسعر من الأصلية؛ السعر مقفل؛ detect_changes.
 OUT OF SCOPE: التخصيص والاسترداد (M4).
 DELIVERABLE: الخدمة + API + اختبارات + docs/modules/logistics.md.
@@ -473,6 +473,7 @@ ROUTING REASON: واجهة فوق API ثابت.
 | P1 | قائمة بحث المنتج: الاسم كاملاً أولاً، وسعران صغيران (§9) | T2 | — (مستقلة، قبل M0) |
 | B1 | PRET-FX-DOUBLE: مرتجع محلي بعملة أجنبية يُحوَّل مرة واحدة (100 USD × 3.7 = 370 لا 1369) (§10.4) | T3 | — (خطأ حيّ، مستقلة، قبل M0، بقرار المالك) |
 | B2 | RECEIVE-RETURN-GUARD: `receive_purchase_invoice` يرفض مستند المرتجع (حرّاس فكّ الترحيل في §10.4 تذهب إلى M2–M4) | T2 | — (خطأ حيّ، مستقلة، قبل M0، بقرار المالك) |
+| Z1 | PRET-ZERO-HEADERS: ترويسة فواتير الشراء الصفرية تُعاد من بنودها مع ربط سند الدفع، وإصلاح المصدر (§10.5) | T3 | M1 (قبل M3، بقرار المالك 2026-11-27) |
 
 > **قيد M1 (§10.1):** لا تُفتح M1 قبل أن تُكتب في الخطة ويعتمدها المالك ثلاثة: أساس العكس المحلي، وترتيب الأقفال، وسجلّ فروق الإسناد الخلفي.
 
@@ -753,3 +754,60 @@ OUT OF SCOPE: حرّاس إلغاء الترحيل (M2–M4).
 DELIVERABLE: الحارس + الاختبار + CHANGELOG.
 ROUTING REASON: سلامة مخزون وقيود.
 ```
+
+### 10.5 تذكرة إصلاح البيانات: ترويسة فواتير الشراء الصفرية (قرار المالك 2026-11-27: «تذكرة إصلاح + حارس»)
+
+**ما وُجد على الإنتاج (قراءة المنسّق، 2026-11-27):** 1210 فاتورة شراء مرحّلة في الشركة 3 ترويستها صفر
+(`subtotal = tax_amount = grand_total = 0`) وبنودها وقيدها صحيحان: كل قيدٍ سطران، مدينه = دائنه = مجموع البنود
+(1210/1210)، بلا ضريبة ولا خصم ولا رسوم ولا مرتجعات، عملة 1 وسعر 1. منها 1206 `fully_paid` و4 `draft`.
+ولكل واحدةٍ من الـ1206 سندُ صرفٍ تلقائي مرحَّل واحد ملاحظاته `دفع تلقائي — فاتورة شراء <الرقم>`، بالمورد نفسه
+ومبلغه = مجموع البنود، غير مربوط (`purchase_invoice` فارغ، بلا توزيع). والأربع المسودة بلا سند.
+
+**المصدر:** `accounting/management/commands/import_jarabaa.py` (`Command._stage_purchases`) ينشئ الفاتورة بلا
+إجماليات، ويُنشئ سند الدفع بلا ربطٍ بها. والخلل قائمٌ اليوم، فإعادة الاستيراد تكرّره.
+
+**لماذا لا تُصلَح الترويسة وحدها:** `purchase_invoice_payment_summary` يقارن `grand_total` بالمدفوع المربوط، فتصحيح
+الإجمالي بلا ربط السند يقلب الـ1206 إلى «غير مدفوعة» (نحو 11 مليون ذمم مفتوحة وهمية في أعمار الذمم وبطاقة
+الشريك). والسند غير المربوط يظهر اليوم «تحت الحساب» بلا حق. لذلك يُصلَح الاثنان معاً في خطوة ذرّية واحدة لكل فاتورة.
+كشف حساب المورد ورصيده يقرآن القيد فلا يتغيّران.
+
+**أثره على المرتجعات:** أساس العكس (`logistics/purchase_return_basis.py`) يبدأ من `grand_total - tax_amount`، فالترويسة
+الصفرية تعطي أساساً صفرياً ومرتجعاً بقيدٍ خاطئ. الإصلاح يجعل `basis_matches_journal` يطابق، وحارس M3 يمنع ما بقي.
+
+```
+TASK-ID: PRET-ZERO-HEADERS
+TIER: T3 deep
+EXECUTOR: المنفّذ (Hydrogen 4 high)
+CONTEXT: accounting/management/commands/import_jarabaa.py (Command._stage_purchases)؛ logistics/services.py
+  (purchase_invoice_recorded_paid, purchase_invoice_payment_summary, receive_purchase_invoice)؛ sales/models.py
+  (SupplierPayment, SupplierPaymentAllocation)؛ logistics/models.py (PurchaseInvoice, PurchaseInvoiceItem)؛
+  logistics/purchase_return_basis.py (compute_invoice_line_basis, basis_matches_journal)؛ نمط الأوامر في
+  logistics/management/commands/backfill_purchase_returns.py
+GOAL: أمر إصلاح يعيد ترويسة فواتير الشراء المرحّلة الصفرية من بنودها ويربط سند دفعها التلقائي، ويُصلح المصدر.
+SUCCESS CRITERIA: اختبارات أولاً تفشل للسبب المذكور ثم تمرّ:
+  (1) فاتورة مرحّلة صفرية + سند تلقائي مطابق ⇒ الأمر بلا --apply لا يكتب شيئاً ويعدّها «مؤهّلة»؛
+  (2) مع --apply ⇒ subtotal = grand_total = مجموع البنود، tax_amount = 0، والسند مربوط، وpayment_status «paid»
+      والمتبقّي صفر، وstatus المخزَّن لم يتغيّر، ولا JournalHeader ولا StockMovement جديد، وbasis_matches_journal صحيح؛
+  (3) فاتورة صفرية بلا سند ⇒ الترويسة تُصلَح وتصير «unpaid» بمتبقٍّ = البنود (حالة المسودات الأربع)؛
+  (4) التخطّي بسببٍ مذكور لكلٍّ من: قيد لا يطابق البنود، ضريبة أو خصم أو شحن أو رسوم أو بند خاضع، مرتجع،
+      غير مرحّلة، بلا بنود، سند بمبلغ أو مورد مختلف أو مربوط أو موزَّع أو غير مرحّل أو مكرّر: حين يوجد للفاتورة سندٌ تلقائي لا يطابق تُتخطّى كلها، فلا تُصلَح ترويستها فتنقلب إلى «غير مدفوعة»؛
+  (5) العزل: --tenant يقصر الأثر على شركته، وشركة أخرى لا تُمسّ؛ والتشغيل الثاني لا يغيّر شيئاً (idempotent)؛
+  (6) المصدر: `_stage_purchases` يكتب subtotal وgrand_total = مجموع البنود، ويربط السند بالفاتورة.
+  `python -m pytest logistics/tests accounting/tests sales/tests -q` ثم البوّابة الكاملة.
+CONSTRAINTS: معاينة افتراضياً و`--apply` للكتابة؛ `transaction.atomic` لكل فاتورة مع `select_for_update` على
+  الفاتورة والسند؛ الكتابة بـ`QuerySet.update` على الحقول المذكورة وحدها (لا save يفعّل حرّاس المرحّل)؛ لا قيد ولا
+  حركة مخزون ولا مساس بـstatus المخزَّن؛ المطابقة بالقرش؛ الربط عبر `SupplierPayment.purchase_invoice` (المسار
+  القديم الذي يحسبه `purchase_invoice_recorded_paid` بكامل المبلغ) لا بتوزيع جديد؛ مطابقة السند بالنصّ الحرفي
+  للملاحظات + الشركة + المورد + المبلغ؛ تقرير بالأعداد لكل سبب ومجموع المبالغ، وسطر logger.info لكل فاتورة
+  مُصلَحة بمعرّفها ومعرّف السند؛ detect_changes يُذكر نطاقه.
+OUT OF SCOPE: الفواتير الدولية، وأي فاتورة بإجمالي غير صفري، وإعادة حساب status المخزَّن، وتعديل القيود.
+DELIVERABLE: logistics/management/commands/repair_zero_purchase_headers.py + اختبارات + إصلاح import_jarabaa
+  + docs/modules/logistics.md وCHANGELOG.
+ROUTING REASON: مال وبيانات إنتاج.
+```
+
+**النشر:** معاينة على الإنتاج، ثم mysqldump، ثم `--apply --tenant 3`، ثم إعادة معاينة `backfill_purchase_returns`:
+المتوقّع صفر عدم تطابق أساس في الشركة 3.
+
+**حارس M3 (يُضاف إلى معايير PRET-M3-INVOICE-RETURN):** إنشاء مرتجع الفاتورة وترحيله يُرفضان برسالة عربية حين
+`basis_matches_journal` لا يطابق للفاتورة الأصلية (السبب في الرسالة)، فلا يُرحَّل مرتجعٌ بأساسٍ لا يطابق دفترها.
