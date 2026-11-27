@@ -639,12 +639,18 @@ class Command(BaseCommand):
                         )
                         recv_lines.append({'item_id': it.id, 'quantity': qty,
                                            'warehouse_id': self.warehouse.id})
+                    inv.subtotal = gross
+                    inv.tax_amount = Decimal('0')
+                    inv.grand_total = gross
+                    inv.save(update_fields=['subtotal', 'tax_amount', 'grand_total'])
                     receive_purchase_invoice(inv, lines=recv_lines, branch=None,
                                              user=None, movement_date=idate)
                     # تسوية المورد لأوامر الشراء المدفوعة (Dr ذمم مورد / Cr صندوق)
                     if paid and gross > 0:
                         sp = SupplierPayment.objects.create(
-                            tenant=self.tenant, partner=supplier, payment_date=idate,
+                            tenant=self.tenant, partner=supplier,
+                            purchase_invoice=inv,
+                            payment_date=idate,
                             amount=gross, currency=self.ils, exchange_rate=Decimal('1'),
                             cash_or_bank_account=self.acc['1101'],
                             notes=f'دفع تلقائي — فاتورة شراء {number}')
